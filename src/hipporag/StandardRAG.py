@@ -12,8 +12,6 @@ from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 from igraph import Graph
 import igraph as ig
-import numpy as np
-from collections import defaultdict
 import re
 import time
 
@@ -64,6 +62,9 @@ class StandardRAG:
         if llm_base_url is not None:
             self.global_config.llm_base_url = llm_base_url
 
+        if embedding_base_url is not None:
+            self.global_config.embedding_base_url = embedding_base_url
+
         if azure_endpoint is not None:
             self.global_config.azure_endpoint = azure_endpoint
 
@@ -88,6 +89,8 @@ class StandardRAG:
         self.embedding_model: BaseEmbeddingModel = _get_embedding_model_class(
             embedding_model_name=self.global_config.embedding_model_name)(global_config=self.global_config,
                                                                           embedding_model_name=self.global_config.embedding_model_name)
+
+        self.prompt_template_manager = PromptTemplateManager(role_mapping={"system": "system", "user": "user", "assistant": "assistant"})
 
         self.chunk_embedding_store = get_embedding_store(
             self.embedding_model,
@@ -183,7 +186,6 @@ class StandardRAG:
         retrieval_results = []
 
         for q_idx, query in tqdm(enumerate(queries), desc="Retrieving", total=len(queries)):
-            logger.info('No facts found after reranking, return DPR results')
             sorted_doc_ids, sorted_doc_scores = self.dense_passage_retrieval(query)
 
             top_k_docs = [self.chunk_embedding_store.get_row(self.passage_node_keys[idx])["content"] for idx in
@@ -375,11 +377,12 @@ class StandardRAG:
 
         all_query_strings = []
         for query in queries:
-            if isinstance(query, QuerySolution) and (
-                    query.question not in self.query_to_embedding['triple'] or query.question not in
-                    self.query_to_embedding['passage']):
-                all_query_strings.append(query.question)
-            elif query not in self.query_to_embedding['triple'] or query not in self.query_to_embedding['passage']:
+            # Only 'passage' embeddings are used by StandardRAG, so the cache
+            # check must not consult the never-populated 'triple' sub-dict.
+            if isinstance(query, QuerySolution):
+                if query.question not in self.query_to_embedding['passage']:
+                    all_query_strings.append(query.question)
+            elif query not in self.query_to_embedding['passage']:
                 all_query_strings.append(query)
 
         if len(all_query_strings) > 0:

@@ -17,8 +17,13 @@ def merge_elements_with_same_first_line(elements, prefix='Wikipedia Title: '):
 
         # Check if the first line is already a key in the dictionary
         if first_line in merged_dict:
-            # Append the current element to the existing value
-            merged_dict[first_line] += "\n" + element.split(first_line, 1)[1].strip('\n')
+            # Append the current element to the existing value. An empty
+            # first_line (element starting with a newline) cannot be split on.
+            if first_line and first_line in element:
+                remainder = element.split(first_line, 1)[1]
+            else:
+                remainder = element
+            merged_dict[first_line] += "\n" + remainder.strip('\n')
         else:
             # Add the current element as a new entry in the dictionary
             merged_dict[first_line] = prefix + element

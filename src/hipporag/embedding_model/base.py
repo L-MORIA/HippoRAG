@@ -86,15 +86,15 @@ class EmbeddingConfig:
         return json.dumps(self._data)
     
     @classmethod
-    def from_dict(cls, config_dict: Dict[str, Any]) -> "LLMConfig":
-        """Create an LLMConfig instance from a dictionary."""
+    def from_dict(cls, config_dict: Dict[str, Any]) -> "EmbeddingConfig":
+        """Create an EmbeddingConfig instance from a dictionary."""
         instance = cls()
         instance.batch_upsert(config_dict)
         return instance
 
     @classmethod
-    def from_json(cls, json_str: str) -> "LLMConfig":
-        """Create an LLMConfig instance from a JSON string."""
+    def from_json(cls, json_str: str) -> "EmbeddingConfig":
+        """Create an EmbeddingConfig instance from a JSON string."""
         instance = cls()
         instance.batch_upsert(json.loads(json_str))
         return instance

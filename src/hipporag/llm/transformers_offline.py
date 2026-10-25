@@ -27,7 +27,6 @@ def convert_text_chat_messages_to_input_string(messages: List[TextChatMessage], 
     )
     return prompt
 
-from vllm import SamplingParams
 class TransformersOffline:
 
     def _init_llm_config(self) -> None:
@@ -54,9 +53,11 @@ class TransformersOffline:
         prompt_text = convert_text_chat_messages_to_input_string(messages_list, self.tokenizer)
         input_ids = self.tokenizer.encode(prompt_text)
         transformers_output = self.model.generate(input_ids, max_new_tokens=max_tokens)
-        response = transformers_output[0]['generated_text']
-        prompt_tokens = len(self.tokenizer.encode(prompt_text))
-        completion_tokens = len(self.tokenizer.encode(response))
+        # generate() returns the prompt followed by the completion; decode
+        # only the newly generated tokens.
+        response = self.tokenizer.decode(transformers_output[0][len(input_ids):], skip_special_tokens=True)
+        prompt_tokens = len(input_ids)
+        completion_tokens = transformers_output.shape[1] - prompt_tokens
         metadata = {
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens
@@ -69,7 +70,6 @@ class TransformersOffline:
 
         all_prompt_texts = [convert_text_chat_messages_to_input_string(messages, self.tokenizer) for messages in messages_list]
 
-        guided = None
         if json_template is not None:
             guided_json=get_pydantic_model(json_template)
             outlines_model = models.Transformers(self.model, self.tokenizer)
@@ -81,9 +81,17 @@ class TransformersOffline:
         else:
             transformers_outputs = []
             for i in range(0, len(all_prompt_texts), 4):
-                transformers_output = self.model.generate(all_prompt_texts[i:i+4], max_tokens=max_tokens)
-                transformers_outputs.extend(transformers_output)
-        all_responses = [completion.model_dump_json() for completion in transformers_outputs]
+                # generate() needs token ids, not raw strings, and takes
+                # max_new_tokens rather than max_tokens.
+                encoded = self.tokenizer(all_prompt_texts[i:i+4], return_tensors="pt", padding=True).to(self.model.device)
+                transformers_output = self.model.generate(**encoded, max_new_tokens=max_tokens)
+                decoded = self.tokenizer.batch_decode(transformers_output, skip_special_tokens=True)
+                transformers_outputs.extend(decoded)
+        # Guided decoding returns pydantic objects; the free-form path returns plain strings.
+        all_responses = [
+            completion.model_dump_json() if hasattr(completion, "model_dump_json") else completion
+            for completion in transformers_outputs
+        ]
         all_prompt_tokens = [len(self.tokenizer.encode(prompt)) for prompt in all_prompt_texts]
         all_completion_tokens = [len(self.tokenizer.encode(response)) for response in all_responses]
 

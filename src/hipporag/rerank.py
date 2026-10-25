@@ -1,5 +1,6 @@
 import json
 import difflib
+import inspect
 from pydantic import BaseModel, Field, TypeAdapter
 from openai import OpenAI
 from copy import deepcopy
@@ -7,6 +8,9 @@ from typing import Union, Optional, List, Dict, Any, Tuple, Literal
 import re
 import ast
 from .prompts.filter_default_prompt import best_dspy_prompt
+from .utils.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 class Fact(BaseModel):
     fact: list[list[str]] = Field(description="A list of facts, each fact is a list of 3 strings: [subject, predicate, object]")
@@ -39,7 +43,8 @@ class DSPyFilter:
 
     def make_template(self, dspy_file_path):
         if dspy_file_path is not None:
-            dspy_saved = json.load(open(dspy_file_path, 'r'))
+            with open(dspy_file_path, 'r', encoding="utf-8") as dspy_file:
+                dspy_saved = json.load(dspy_file)
         else:
             dspy_saved = best_dspy_prompt
 
@@ -78,7 +83,7 @@ class DSPyFilter:
                             parsed_value = value
                     parsed = TypeAdapter(Fact).validate_python(parsed_value).fact
                 except Exception as e:
-                    print(
+                    logger.warning(
                         f"Error parsing field {k}: {e}.\n\n\t\tOn attempting to parse the value\n```\n{value}\n```"
                     )
 
@@ -88,17 +93,23 @@ class DSPyFilter:
         # make prompt
         messages = deepcopy(self.message_template)
         messages.append({"role": "user", "content": self.one_input_template.format(question=question, fact_before_filter=fact_before_filter)})
-        # call openai
 
-        self.default_gen_kwargs['max_completion_tokens'] = 512
+        # Backends differ in what infer() accepts: the offline backends declare
+        # a max_tokens parameter, while the OpenAI-style backends already carry
+        # model and token limits in their generate_params, so they must not be
+        # overridden here with chat-completions-only kwargs.
+        gen_kwargs = {}
+        try:
+            sig = inspect.signature(self.llm_infer_fn)
+            if 'max_tokens' in sig.parameters:
+                gen_kwargs['max_tokens'] = 512
+        except (TypeError, ValueError):
+            pass
 
-        response = self.llm_infer_fn(
-            messages=messages,
-            model=self.model_name,
-            **self.default_gen_kwargs
-        )
+        response = self.llm_infer_fn(messages=messages, **gen_kwargs)
 
-        if len(response) > 1:
+        if isinstance(response, tuple):
+            # infer() returns (message, metadata[, cache_hit]) depending on the backend
             return response[0]
         return response
 
@@ -112,19 +123,21 @@ class DSPyFilter:
                len_after_rerank: int =None) -> Tuple[List[int], List[Tuple], dict]:
         fact_before_filter = {"fact": [list(candidate_item) for candidate_item in candidate_items]}
         try:
-            # prediction = self.program(question=query, fact_before_filter=json.dumps(fact_before_filter))
             response = self.llm_call(query, json.dumps(fact_before_filter))
             generated_facts = self.parse_filter(response)
         except Exception as e:
-            print('exception', e)
+            logger.warning(f"Fact reranking LLM call failed; falling back to unreranked facts: {e}")
             generated_facts = []
         result_indices = []
+        candidate_item_strs = [str(i) for i in candidate_items]
         for generated_fact in generated_facts:
-            closest_matched_fact = difflib.get_close_matches(str(generated_fact), [str(i) for i in candidate_items], n=1, cutoff=0.0)[0]
+            closest_matches = difflib.get_close_matches(str(generated_fact), candidate_item_strs, n=1, cutoff=0.0)
+            if not closest_matches:
+                continue
             try:
-                result_indices.append(candidate_items.index(ast.literal_eval(closest_matched_fact)))
-            except Exception as e:
-                print('result_indices exception', e)
+                result_indices.append(candidate_items.index(ast.literal_eval(closest_matches[0])))
+            except (ValueError, SyntaxError) as e:
+                logger.warning(f"Failed to match reranked fact to a candidate: {e}")
 
         sorted_candidate_indices = [candidate_indices[i] for i in result_indices]
         sorted_candidate_items = [candidate_items[i] for i in result_indices]

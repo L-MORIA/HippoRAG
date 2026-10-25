@@ -129,10 +129,13 @@ class TransformersLLM(BaseLLM):
         else:
             cached = False
             response = self.__llm_call(params)
-            message = self.tokenizer.decode(response[0], skip_special_tokens=True)
+            prompt_len = params["prompt_text"].shape[1]
+            # generate() returns the prompt followed by the completion; decode
+            # only the newly generated tokens.
+            message = self.tokenizer.decode(response[0][prompt_len:], skip_special_tokens=True)
             metadata = {
-                "prompt_tokens": params["prompt_text"].shape[1], 
-                "completion_tokens": response.shape[1],
+                "prompt_tokens": prompt_len, 
+                "completion_tokens": response.shape[1] - prompt_len,
             }
             self.cache.write(params, message, metadata)
 

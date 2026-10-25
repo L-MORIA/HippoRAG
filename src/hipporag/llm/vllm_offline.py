@@ -34,7 +34,6 @@ class VLLMOffline:
         model_name = kwargs.get('model_name', global_config.llm_name)
         if model_name is None:
             model_name = 'meta-llama/Llama-3.3-70B-Instruct'
-        from vllm import LLM
         pipeline_parallel_size = 1
         tensor_parallel_size = kwargs.get('num_gpus', torch.cuda.device_count())
         if '8B' in model_name:

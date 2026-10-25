@@ -140,7 +140,9 @@ class PromptTemplateManager:
                 raise ValueError(f"Missing variable in chat history template '{name}': {e}")
     
     def sync_render(self, name: str, **kwargs) -> Union[str, List[Dict[str, Any]]]:
-        return asyncio.run(self.render(name, **kwargs))
+        # render() is synchronous; wrapping it in asyncio.run() would raise
+        # TypeError ("a coroutine was expected").
+        return self.render(name, **kwargs)
 
     def list_template_names(self) -> List[str]:
         """

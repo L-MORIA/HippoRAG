@@ -108,16 +108,20 @@ def dynamic_retry(experiment_config: BaseConfig):
     Factory function to create a retry decorator with dynamic parameters.
 
     Args:
-        experiment_config (BaseConfig): Configuration containing stop and wait parameters. Expected to use the global config for running all experiments. 
+        experiment_config (BaseConfig): Configuration containing stop and wait parameters. Expected to use the global config for running all experiments.
 
     Returns:
         Callable: A retry decorator with dynamically set parameters.
     """
-    stop = stop_after_attempt(experiment_config.async_max_retry_attempts)
+    # The async_* keys are optional; fall back to the shared max_retry_attempts
+    # so the decorator works with any BaseConfig instance.
+    max_attempts = getattr(experiment_config, 'async_max_retry_attempts',
+                           getattr(experiment_config, 'max_retry_attempts', 5))
+    stop = stop_after_attempt(max_attempts)
     wait = wait_exponential(
-        multiplier=experiment_config.async_retry_wait_exp_multiplier,
-        min=experiment_config.async_retry_min_wait_exp_time,
-        max=experiment_config.async_retry_max_wait_exp_time,
+        multiplier=getattr(experiment_config, 'async_retry_wait_exp_multiplier', 1),
+        min=getattr(experiment_config, 'async_retry_min_wait_exp_time', 1),
+        max=getattr(experiment_config, 'async_retry_max_wait_exp_time', 30),
     )
 
     return retry(

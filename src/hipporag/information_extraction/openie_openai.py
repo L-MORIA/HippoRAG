@@ -33,7 +33,11 @@ def _extract_ner_from_response(real_response):
     if match is None:
         # If pattern doesn't match, return an empty list
         return []
-    return eval(match.group())["named_entities"]
+    try:
+        return json.loads(match.group())["named_entities"]
+    except json.JSONDecodeError as e:
+        logger.warning(f"Failed to parse NER response as JSON: {e}")
+        return []
 
 
 class OpenIE:
@@ -85,7 +89,11 @@ class OpenIE:
             if match is None:
                 # If pattern doesn't match, return an empty list
                 return []
-            return eval(match.group())["triples"]
+            try:
+                return json.loads(match.group())["triples"]
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse triple extraction response as JSON: {e}")
+                return []
 
         # PREPROCESSING
         messages = self.prompt_template_manager.render(
