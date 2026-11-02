@@ -53,6 +53,66 @@ class BaseConfig:
         metadata={"help": "Specifying the format that the model must output."},
     )
 
+    # --- Настройки, добавленные upstream (fork/main) ---
+    bedrock_mantle_auth: Literal["api_key", "aws_credentials"] = field(
+        default="api_key",
+        metadata={"help": "Authentication method for the Amazon Bedrock Mantle endpoint."},
+    )
+    bedrock_aws_profile: Optional[str] = field(
+        default=None,
+        metadata={"help": "AWS profile name used by the Bedrock Mantle backend."},
+    )
+    bedrock_region: Optional[str] = field(
+        default=None,
+        metadata={"help": "AWS region for the Bedrock Mantle backend."},
+    )
+
+    # Vector store backend
+    vector_store_type: Literal["parquet", "qdrant", "chroma", "milvus"] = field(
+        default="parquet",
+        metadata={"help": "Which embedding store backend to use."},
+    )
+
+    # Qdrant-specific settings (only used when vector_store_type='qdrant')
+    qdrant_url: Optional[str] = field(
+        default=None,
+        metadata={"help": "URL of a remote Qdrant server (e.g. 'http://localhost:6333')."},
+    )
+    qdrant_api_key: Optional[str] = field(
+        default=None,
+        metadata={"help": "API key for a remote Qdrant server."},
+    )
+
+    # ChromaDB-specific settings (only used when vector_store_type='chroma')
+    chroma_host: Optional[str] = field(
+        default=None,
+        metadata={"help": "Hostname of a remote ChromaDB HTTP server."},
+    )
+    chroma_port: int = field(
+        default=8000,
+        metadata={"help": "Port of a remote ChromaDB HTTP server."},
+    )
+
+    # Milvus-specific settings (only used when vector_store_type='milvus')
+    milvus_uri: Optional[str] = field(
+        default=None,
+        metadata={"help": "Milvus URI. If None, MILVUS_URI is used when set."},
+    )
+    milvus_token: Optional[str] = field(
+        default=None,
+        metadata={"help": "Milvus authentication token."},
+    )
+    milvus_db_name: Optional[str] = field(
+        default=None,
+        metadata={"help": "Milvus database name."},
+    )
+    milvus_consistency_level: Optional[Literal["Strong", "Session", "Bounded", "Eventually"]] = (
+        field(
+            default=None,
+            metadata={"help": "Milvus consistency level."},
+        )
+    )
+
     ## LLM specific attributes -> Async hyperparameters
     max_retry_attempts: int = field(
         default=5,

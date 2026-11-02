@@ -3,9 +3,9 @@ import json
 import logging
 import re
 from argparse import ArgumentTypeError
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import md5
-from typing import Any, Dict, List, Literal
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 
@@ -88,6 +88,26 @@ class TripleRawOutput:
     response: str
     triples: List[List[str]]
     metadata: Dict[str, Any]
+
+
+@dataclass(frozen=True)
+class Chunk:
+    """A text chunk and its source metadata before indexing."""
+
+    content: str
+    source_id: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class RetrievalResult:
+    """Internal result for one retrieval query."""
+
+    query: str
+    docs: List[str]
+    scores: np.ndarray
+    doc_metadata: List[Dict[str, Any]] = field(default_factory=list)
+    graph_seeds: List[Tuple] = field(default_factory=list)
 
 
 @dataclass

@@ -68,7 +68,9 @@ class RetrievalRecall(BaseMetric):
         # Average pooled results over all examples
         num_examples = len(gold_docs)
         for k in k_list:
-            pooled_eval_results[f"Recall@{k}"] /= num_examples
+            pooled_eval_results[f"Recall@{k}"] = (
+                pooled_eval_results[f"Recall@{k}"] / num_examples if num_examples else 0.0
+            )
 
         # round off to 4 decimal places for pooled results
         pooled_eval_results = {k: round(v, 4) for k, v in pooled_eval_results.items()}

@@ -2,8 +2,9 @@ import json
 import logging
 import os
 import threading
+from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import numpy as np
 import pandas as pd
@@ -13,7 +14,65 @@ from .utils.misc_utils import compute_mdhash_id
 logger = logging.getLogger(__name__)
 
 
-class EmbeddingStore:
+class BaseEmbeddingStore(ABC):
+    """Abstract base class for all embedding store backends.
+
+    All backends must expose a ``text_to_hash_id`` dict-like attribute that
+    maps raw text -> its hash ID, because HippoRAG.delete() accesses it directly.
+    """
+
+    namespace: str
+    embedding_model: Any
+    batch_size: int
+
+    # Must be kept in-sync by every subclass (populated on init, insert, delete)
+    text_to_hash_id: Dict[str, str]
+
+    def get_missing_string_hash_ids(self, texts: List[str]) -> Dict[str, Dict]:
+        """Return {hash_id: row} for texts not yet stored."""
+        existing = set(self.get_all_ids())
+        result = {}
+        for text in texts:
+            h = compute_mdhash_id(text, prefix=self.namespace + "-")
+            if h not in existing:
+                result[h] = {"hash_id": h, "content": text}
+        return result
+
+    def get_hash_id(self, text: str) -> str:
+        return self.text_to_hash_id[text]
+
+    @abstractmethod
+    def insert_strings(self, texts: List[str]) -> None: ...
+
+    @abstractmethod
+    def delete(self, hash_ids) -> None: ...
+
+    @abstractmethod
+    def get_row(self, hash_id: str) -> Dict: ...
+
+    @abstractmethod
+    def get_rows(self, hash_ids: List[str]) -> Dict[str, Dict]: ...
+
+    @abstractmethod
+    def get_all_ids(self) -> List[str]: ...
+
+    @abstractmethod
+    def get_all_id_to_rows(self) -> Dict[str, Dict]: ...
+
+    @abstractmethod
+    def get_all_texts(self) -> Set[str]: ...
+
+    @abstractmethod
+    def get_embedding(self, hash_id: str, dtype=np.float32) -> np.ndarray: ...
+
+    @abstractmethod
+    def get_embeddings(self, hash_ids: List[str], dtype=np.float32) -> List[np.ndarray]: ...
+
+    def close(self) -> None:
+        """Release any held resources (connections, file locks). No-op by default."""
+
+
+class EmbeddingStore(BaseEmbeddingStore):
     def __init__(self, embedding_model, db_filename, batch_size, namespace):
         """
         Initializes the class with necessary configurations and sets up the working directory.
@@ -308,3 +367,40 @@ class EmbeddingStore:
         embeddings = np.array(self.embeddings, dtype=dtype)[indices]
 
         return embeddings
+
+
+def get_embedding_store(
+    embedding_model,
+    db_path: str,
+    batch_size: int,
+    namespace: str,
+    global_config=None,
+) -> BaseEmbeddingStore:
+    """Factory that returns the appropriate EmbeddingStore backend based on
+    ``global_config.vector_store_type``.
+
+    Defaults to the local Parquet backend when no config is supplied.
+    """
+    store_type = (
+        getattr(global_config, "vector_store_type", "parquet") if global_config else "parquet"
+    )
+
+    if store_type == "parquet":
+        return EmbeddingStore(embedding_model, db_path, batch_size, namespace)
+    elif store_type == "qdrant":
+        from .vector_stores.qdrant_store import QdrantEmbeddingStore
+
+        return QdrantEmbeddingStore(embedding_model, db_path, batch_size, namespace, global_config)
+    elif store_type == "chroma":
+        from .vector_stores.chroma_store import ChromaEmbeddingStore
+
+        return ChromaEmbeddingStore(embedding_model, db_path, batch_size, namespace, global_config)
+    elif store_type == "milvus":
+        from .vector_stores.milvus_store import MilvusEmbeddingStore
+
+        return MilvusEmbeddingStore(embedding_model, db_path, batch_size, namespace, global_config)
+    else:
+        raise ValueError(
+            f"Unknown vector_store_type: '{store_type}'. "
+            f"Choose from 'parquet', 'qdrant', 'chroma', or 'milvus'."
+        )
