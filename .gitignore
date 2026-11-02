@@ -33,3 +33,7 @@ models/
 archive/
 *.egg-info/
 temp_uploads/
+# Временные скрипты диагностики (аудит)
+tmp_*.py
+tmp_*.json
+tmp_*.txt

@@ -176,6 +176,33 @@ ASTRO_TERMS = ZODIAC_SIGNS + ['марс', 'венера', 'меркурий', '�
                                'асцендент', 'десцендент', 'фэншуй', 'багуа']
 
 
+_META_REFORMULATION_MARKERS = (
+    "не содержит",
+    "нет астрологических",
+    "невозможно улучшить",
+    "нельзя улучшить",
+    "запрос не",
+    "улучшить запрос",
+    "уже хорош",
+    "не требуется",
+    "без изменений",
+    "does not contain",
+    "cannot be improved",
+    "no improvement",
+)
+
+
+def _is_meta_reformulation(content: str) -> bool:
+    """Ответ LLM — мета-текст («Запрос не содержит…»), а не поисковый запрос.
+
+    Такой ответ нельзя отдавать в эмбеддинг: его термины не совпадают ни с
+    одним чанком, keyword-boost обнуляется, и выдача перестаёт релевантной
+    (дефект режима 1, измерен 2026-11-02).
+    """
+    low = content.lower()
+    return any(marker in low for marker in _META_REFORMULATION_MARKERS)
+
+
 def reformulate_query(hipporag, query):
     """Улучшить запрос через LLM (прямой вызов LM Studio API)."""
     import httpx
@@ -205,7 +232,12 @@ def reformulate_query(hipporag, query):
                     "Ты — эксперт по астрологии и фэншуй. "
                     "Улучши поисковый запрос: выдели ключевые термины "
                     "(знак зодиака, планета, зона дома, действие). "
-                    "Ответь ОДНИМ предложением (3-10 слов). Без пояснений."
+                    "Ответь ОДНИМ предложением (3-10 слов). Без пояснений.\n"
+                    "ВАЖНО: запрос может быть о любой теме (автор, книга, издание). "
+                    "В таком случае выдели ключевые слова запроса (имя, название, тема) "
+                    "и верни их как поисковый запрос. "
+                    "НИКОГДА не отвечай комментарием о самом запросе "
+                    "(например «Запрос не содержит…») — верни только сам запрос."
                 )},
                 {"role": "user", "content": f"Запрос: {query}"}
             ],
@@ -227,6 +259,12 @@ def reformulate_query(hipporag, query):
                     content = lines[-1].strip('"\'').replace('**', '') if lines else ""
 
             if content and len(content) > 5:
+                if _is_meta_reformulation(content):
+                    print(
+                        "  ⚠️ LLM ответил мета-текстом вместо запроса — "
+                        "используется оригинальный запрос"
+                    )
+                    return query
                 print(f"  ✅ Переформулировка: '{query}' → '{content}'")
                 return content
         print("  ⚠️ LLM вернул пустой ответ, используется оригинальный запрос")
@@ -238,9 +276,18 @@ def reformulate_query(hipporag, query):
 
 
 def split_query_terms(query):
-    """Разбить запрос на значимые термы."""
+    """Разбить запрос на значимые термы.
+
+    Пунктуация снимается: без этого «Овна?» превращалось в токен 'овна?',
+    который не совпадал ни с одним словом корпуса — BM25 и keyword-boost
+    теряли совпадения на любом запросе со знаком вопроса (P2-10).
+    """
     q = query.lower()
-    terms = [w for w in q.split() if len(w) > 2 and w not in STOP_WORDS]
+    terms = []
+    for w in q.split():
+        w = re.sub(r"[^\w\s]", "", w)
+        if len(w) > 2 and w not in STOP_WORDS:
+            terms.append(w)
     return terms, q
 
 
@@ -436,6 +483,10 @@ def _rerank_with_crossencoder_ru(query, candidates):
         ce = _get_crossencoder_ru()
         pairs = [(query, c[0][:512]) for c in candidates]
         xc_scores = ce.predict(pairs, show_progress_bar=False)
+        # Сырой CE-скор у RU-модели — вероятность (0…1), у EN — логит (…±11),
+        # а old — embedding-скор (0…1). Смешивать их напрямую бессмысленно:
+        # коэффициент 0.7/0.3 не означает ничего. Нормируем xc (P1-4).
+        xc_scores = min_max_normalize(np.array([float(x) for x in xc_scores]))
         reranked = []
         for i, c in enumerate(candidates):
             xc = float(xc_scores[i])
@@ -458,6 +509,9 @@ def _rerank_with_crossencoder(query, candidates):
         ce = _get_crossencoder()
         pairs = [(query, c[0][:512]) for c in candidates]
         xc_scores = ce.predict(pairs, show_progress_bar=False)
+        # Нормировка CE-скора перед смешиванием — см. P1-4 (в EN-ветке сырой
+        # логит давал 86 % веса в итоговом скоре и переставлял кандидатов).
+        xc_scores = min_max_normalize(np.array([float(x) for x in xc_scores]))
         reranked = []
         for i, c in enumerate(candidates):
             xc = float(xc_scores[i])
@@ -686,11 +740,24 @@ def search_e5_rerank(hipporag, query, top_k=10, candidate_pool=200):
 
 
 def _get_chunk_meta(chunk_store, idx):
+    """Метаданные чанка: (source_file, page_num).
+
+    Формат метаданных менялся (S-12): раньше это был dict, теперь — список
+    dict'ов, по одному на каждый источник документа. Поддерживаются оба
+    формата (и JSON-строка), иначе m.get() бросает AttributeError, исключение
+    глушится и функция возвращает ("", 0) для КАЖДОГО чанка — из-за чего все
+    вызовы с "if not source: continue" отбрасывали кандидатов и 8 режимов
+    меню возвращали пустоту (P0-2).
+    """
     try:
         row = chunk_store.get_row(chunk_store.hash_ids[idx])
         m = row.get("metadata", {}) if isinstance(row, dict) else {}
         if isinstance(m, str):
             m = json.loads(m)
+        if isinstance(m, list):
+            m = m[0] if m else {}  # список источников → первичный источник
+        if not isinstance(m, dict):
+            return "", 0
         return str(m.get("source_file", "")), int(m.get("page_num", 0))
     except Exception:
         return "", 0
@@ -1091,6 +1158,13 @@ def _colbert_encode(text, max_length=512):
     for k, v in tokens.items():
         if isinstance(v, torch.Tensor) and v.shape[1] > max_length:
             tokens[k] = v[:, :max_length]
+    # Токенизатор возвращает тензоры на CPU, а модель может быть на CUDA:
+    # token_type_ids в слое эмбеддингов идёт через index_select и падает с
+    # "Expected all tensors to be on the same device" (P2-7).
+    device = next(_COLBERT_BERT.parameters()).device
+    tokens = {
+        k: (v.to(device) if isinstance(v, torch.Tensor) else v) for k, v in tokens.items()
+    }
     with torch.no_grad():
         out = _COLBERT_BERT(**tokens)
         emb = out.last_hidden_state
@@ -3010,6 +3084,26 @@ def _qa_lookup(query, cache):
         return best, best_score
     return None, 0
 
+def _qa_derive_short(text: str) -> str:
+    """Короткий ответ из текста результата, если нет маркера 'ОТВЕТ:'.
+
+    Раньше для режимов без маркера (например 22 — SemFilter) в кэш попадал
+    пустой short_answer, и режим 23 отдавал «ОТВЕТ: не указан» (P2-8).
+    """
+    if not text:
+        return ""
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("===") and line.endswith("==="):
+            continue
+        if line.startswith("["):  # строки вида "[Источник 1 — file.pdf стр.1-2]"
+            continue
+        return line[:200]
+    return ""
+
+
 def _qa_store(query, answer, short_answer, method_name, method_id, sources, score=999.0):
     """Сохранить результат в кэш."""
     cache = _qa_load()
@@ -3018,6 +3112,8 @@ def _qa_store(query, answer, short_answer, method_name, method_id, sources, scor
     for e in cache:
         if e["query_norm"] == qn and e["method_id"] == method_id:
             return
+    if not short_answer:
+        short_answer = _qa_derive_short(answer)
     entry = {
         "id": f"qa_{len(cache) + 1}",
         "query": query,
@@ -3105,6 +3201,10 @@ def search_qa_cache(hipporag, query, top_k=10):
         print(f"  Найден в кэше (совпадение: {score:.0%})", flush=True)
         short = cached.get("short_answer", "")
         full = cached.get("answer", "")
+        # Записи, созданные до P2-8, могли остаться с пустым short_answer —
+        # восстанавливаем короткий ответ из полного (P2-8).
+        if not short:
+            short = _qa_derive_short(full)
         result = (
             f"=== ОТВЕТ ИЗ КЭША ===\n"
             f"Запрос: {query}\n"
