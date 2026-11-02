@@ -2,11 +2,11 @@ import os
 from typing import List
 import json
 
-from src.hipporag.HippoRAG import HippoRAG
-from src.hipporag.StandardRAG import StandardRAG
-from src.hipporag.utils.misc_utils import string_to_bool
-from src.hipporag.utils.config_utils import BaseConfig
-from src.hipporag.embedding_store import EmbeddingStore
+from hipporag.HippoRAG import HippoRAG
+from hipporag.StandardRAG import StandardRAG
+from hipporag.utils.misc_utils import string_to_bool
+from hipporag.utils.config_utils import BaseConfig
+from hipporag.embedding_store import EmbeddingStore
 
 import argparse
 

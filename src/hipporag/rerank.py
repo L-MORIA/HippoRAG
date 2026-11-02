@@ -1,15 +1,22 @@
-import json
-import difflib
-from pydantic import BaseModel, Field, TypeAdapter
-from openai import OpenAI
-from copy import deepcopy
-from typing import Union, Optional, List, Dict, Any, Tuple, Literal
-import re
 import ast
+import difflib
+import json
+import logging
+import re
+from copy import deepcopy
+from typing import List, Tuple
+
+from pydantic import BaseModel, Field, TypeAdapter
+
 from .prompts.filter_default_prompt import best_dspy_prompt
 
+logger = logging.getLogger(__name__)
+
+
 class Fact(BaseModel):
-    fact: list[list[str]] = Field(description="A list of facts, each fact is a list of 3 strings: [subject, predicate, object]")
+    fact: list[list[str]] = Field(
+        description="A list of facts, each fact is a list of 3 strings: [subject, predicate, object]"
+    )
 
 
 class DSPyFilter:
@@ -31,7 +38,9 @@ class DSPyFilter:
         """
         dspy_file_path = hipporag.global_config.rerank_dspy_file_path
         self.one_input_template = """[[ ## question ## ]]\n{question}\n\n[[ ## fact_before_filter ## ]]\n{fact_before_filter}\n\nRespond with the corresponding output fields, starting with the field `[[ ## fact_after_filter ## ]]` (must be formatted as a valid Python Fact), and then ending with the marker for `[[ ## completed ## ]]`."""
-        self.one_output_template = """[[ ## fact_after_filter ## ]]\n{fact_after_filter}\n\n[[ ## completed ## ]]"""
+        self.one_output_template = (
+            """[[ ## fact_after_filter ## ]]\n{fact_after_filter}\n\n[[ ## completed ## ]]"""
+        )
         self.message_template = self.make_template(dspy_file_path)
         self.llm_infer_fn = hipporag.llm_model.infer
         self.model_name = hipporag.global_config.llm_name
@@ -39,23 +48,37 @@ class DSPyFilter:
 
     def make_template(self, dspy_file_path):
         if dspy_file_path is not None:
-            dspy_saved = json.load(open(dspy_file_path, 'r'))
+            dspy_saved = json.load(open(dspy_file_path, "r"))
         else:
             dspy_saved = best_dspy_prompt
 
-        system_prompt = dspy_saved['prog']['system']
+        system_prompt = dspy_saved["prog"]["system"]
         message_template = [
             {"role": "system", "content": system_prompt},
         ]
         demos = dspy_saved["prog"]["demos"]
         for demo in demos:
-            message_template.append({"role": "user", "content": self.one_input_template.format(question=demo["question"], fact_before_filter=demo["fact_before_filter"])})
-            message_template.append({"role": "assistant", "content": self.one_output_template.format(fact_after_filter=demo["fact_after_filter"])})
+            message_template.append(
+                {
+                    "role": "user",
+                    "content": self.one_input_template.format(
+                        question=demo["question"], fact_before_filter=demo["fact_before_filter"]
+                    ),
+                }
+            )
+            message_template.append(
+                {
+                    "role": "assistant",
+                    "content": self.one_output_template.format(
+                        fact_after_filter=demo["fact_after_filter"]
+                    ),
+                }
+            )
         return message_template
 
     def parse_filter(self, response):
         sections = [(None, [])]
-        field_header_pattern = re.compile('\\[\\[ ## (\\w+) ## \\]\\]')
+        field_header_pattern = re.compile("\\[\\[ ## (\\w+) ## \\]\\]")
         for line in response.splitlines():
             match = field_header_pattern.match(line.strip())
             if match:
@@ -78,24 +101,27 @@ class DSPyFilter:
                             parsed_value = value
                     parsed = TypeAdapter(Fact).validate_python(parsed_value).fact
                 except Exception as e:
-                    print(
-                        f"Error parsing field {k}: {e}.\n\n\t\tOn attempting to parse the value\n```\n{value}\n```"
-                    )
+                    logger.warning(f"Error parsing field {k}: {e}; value: {value!r:.300}")
 
         return parsed
 
     def llm_call(self, question, fact_before_filter):
         # make prompt
         messages = deepcopy(self.message_template)
-        messages.append({"role": "user", "content": self.one_input_template.format(question=question, fact_before_filter=fact_before_filter)})
+        messages.append(
+            {
+                "role": "user",
+                "content": self.one_input_template.format(
+                    question=question, fact_before_filter=fact_before_filter
+                ),
+            }
+        )
         # call openai
 
-        self.default_gen_kwargs['max_completion_tokens'] = 512
+        self.default_gen_kwargs["max_completion_tokens"] = 512
 
         response = self.llm_infer_fn(
-            messages=messages,
-            model=self.model_name,
-            **self.default_gen_kwargs
+            messages=messages, model=self.model_name, **self.default_gen_kwargs
         )
 
         if len(response) > 1:
@@ -105,27 +131,44 @@ class DSPyFilter:
     def __call__(self, *args, **kwargs):
         return self.rerank(*args, **kwargs)
 
-    def rerank(self,
-               query: str,
-               candidate_items: List[Tuple],
-               candidate_indices: List[int],
-               len_after_rerank: int =None) -> Tuple[List[int], List[Tuple], dict]:
+    def rerank(
+        self,
+        query: str,
+        candidate_items: List[Tuple],
+        candidate_indices: List[int],
+        len_after_rerank: int = None,
+    ) -> Tuple[List[int], List[Tuple], dict]:
         fact_before_filter = {"fact": [list(candidate_item) for candidate_item in candidate_items]}
         try:
-            # prediction = self.program(question=query, fact_before_filter=json.dumps(fact_before_filter))
             response = self.llm_call(query, json.dumps(fact_before_filter))
             generated_facts = self.parse_filter(response)
         except Exception as e:
-            print('exception', e)
+            logger.warning(f"LLM rerank call failed, falling back to score order: {e}")
             generated_facts = []
+
         result_indices = []
         for generated_fact in generated_facts:
-            closest_matched_fact = difflib.get_close_matches(str(generated_fact), [str(i) for i in candidate_items], n=1, cutoff=0.0)[0]
+            if not candidate_items:
+                continue
+            match = difflib.get_close_matches(
+                str(generated_fact), [str(i) for i in candidate_items], n=1, cutoff=0.0
+            )
+            if not match:
+                continue
             try:
-                result_indices.append(candidate_items.index(eval(closest_matched_fact)))
+                result_indices.append(candidate_items.index(ast.literal_eval(match[0])))
             except Exception as e:
-                print('result_indices exception', e)
+                logger.warning(f"result_indices exception: {e}")
+
+        if not result_indices and candidate_items:
+            result_indices = list(
+                range(min(len(candidate_items), len_after_rerank or len(candidate_items)))
+            )
 
         sorted_candidate_indices = [candidate_indices[i] for i in result_indices]
         sorted_candidate_items = [candidate_items[i] for i in result_indices]
-        return sorted_candidate_indices[:len_after_rerank], sorted_candidate_items[:len_after_rerank], {'confidence': None}
+        return (
+            sorted_candidate_indices[:len_after_rerank],
+            sorted_candidate_items[:len_after_rerank],
+            {"confidence": None},
+        )

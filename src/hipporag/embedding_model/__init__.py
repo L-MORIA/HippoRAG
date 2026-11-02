@@ -1,13 +1,12 @@
+from ..utils.logging_utils import get_logger
+from .base import BaseEmbeddingModel, EmbeddingConfig
+from .Cohere import CohereEmbeddingModel
 from .Contriever import ContrieverModel
-from .base import EmbeddingConfig, BaseEmbeddingModel
 from .GritLM import GritLMEmbeddingModel
 from .NVEmbedV2 import NVEmbedV2EmbeddingModel
 from .OpenAI import OpenAIEmbeddingModel
-from .Cohere import CohereEmbeddingModel
 from .Transformers import TransformersEmbeddingModel
 from .VLLM import VLLMEmbeddingModel
-
-from ..utils.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -27,4 +26,26 @@ def _get_embedding_model_class(embedding_model_name: str = "nvidia/NV-Embed-v2")
         return TransformersEmbeddingModel
     elif embedding_model_name.startswith("VLLM/"):
         return VLLMEmbeddingModel
-    assert False, f"Unknown embedding model name: {embedding_model_name}"
+    elif embedding_model_name.startswith("sentence-transformers/"):
+        return TransformersEmbeddingModel
+    elif embedding_model_name.startswith("intfloat/"):
+        return TransformersEmbeddingModel
+    elif "MiniLM" in embedding_model_name or "all-MiniLM" in embedding_model_name:
+        return TransformersEmbeddingModel
+    elif "multilingual" in embedding_model_name.lower():
+        return TransformersEmbeddingModel
+    raise ValueError(f"Unknown embedding model name: {embedding_model_name}")
+
+
+__all__ = [
+    "ContrieverModel",
+    "EmbeddingConfig",
+    "BaseEmbeddingModel",
+    "GritLMEmbeddingModel",
+    "NVEmbedV2EmbeddingModel",
+    "OpenAIEmbeddingModel",
+    "CohereEmbeddingModel",
+    "TransformersEmbeddingModel",
+    "VLLMEmbeddingModel",
+    "_get_embedding_model_class",
+]

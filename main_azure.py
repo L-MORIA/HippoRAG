@@ -2,9 +2,9 @@ import os
 from typing import List
 import json
 
-from src.hipporag.HippoRAG import HippoRAG
-from src.hipporag.utils.misc_utils import string_to_bool
-from src.hipporag.utils.config_utils import BaseConfig
+from hipporag.HippoRAG import HippoRAG
+from hipporag.utils.misc_utils import string_to_bool
+from hipporag.utils.config_utils import BaseConfig
 
 import argparse
 

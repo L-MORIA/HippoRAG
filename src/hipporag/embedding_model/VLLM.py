@@ -1,11 +1,13 @@
 from typing import List
+
 import numpy as np
+import requests
 from tqdm import tqdm
 
-from .base import BaseEmbeddingModel
-from ..utils.config_utils import BaseConfig
 from ..prompts.linking import get_query_instruction
-import requests
+from ..utils.config_utils import BaseConfig
+from .base import BaseEmbeddingModel
+
 
 class VLLMEmbeddingModel(BaseEmbeddingModel):
     """
@@ -13,33 +15,31 @@ class VLLMEmbeddingModel(BaseEmbeddingModel):
         embedding_model_name starts with "VLLM/"
     The embedding base url should contain the v1/embeddings.
     """
-    def __init__(self, global_config:BaseConfig, embedding_model_name:str) -> None:
+
+    def __init__(self, global_config: BaseConfig, embedding_model_name: str) -> None:
         super().__init__(global_config=global_config)
 
-        self.model_id = embedding_model_name[len("VLLM/"):]
-        self.embedding_type = 'float'
+        self.model_id = embedding_model_name[len("VLLM/") :]
+        self.embedding_type = "float"
         self.batch_size = 32
 
         self.url = global_config.embedding_base_url
 
-        self.search_query_instr = set([
-            get_query_instruction('query_to_fact'),
-            get_query_instruction('query_to_passage')
-        ])
+        self.search_query_instr = set(
+            [get_query_instruction("query_to_fact"), get_query_instruction("query_to_passage")]
+        )
 
     def call_model(self, input_text) -> List[np.ndarray]:
         if isinstance(input_text, str):
             input_text = [input_text]
-        headers = {
-            "Content-Type": "application/json"
-        }
-        
+        headers = {"Content-Type": "application/json"}
+
         payload = {
             "model": self.model_id,
             "input": input_text,
         }
 
-        response = requests.post(self.base_url, headers=headers, json=payload)
+        response = requests.post(self.base_url, headers=headers, json=payload, timeout=120)
         response.raise_for_status()
         result = response.json()
         return np.array([result["data"][i]["embedding"] for i in range(len(result["data"]))])
@@ -51,9 +51,9 @@ class VLLMEmbeddingModel(BaseEmbeddingModel):
     def batch_encode(self, texts: List[str], **kwargs) -> None:
         if len(texts) < self.batch_size:
             return self.encode(texts)
-        
+
         results = []
         batch_indexes = list(range(0, len(texts), self.batch_size))
         for i in tqdm(batch_indexes, desc="Batch Encoding"):
-            results.append(self.encode(texts[i:i + self.batch_size]))
+            results.append(self.encode(texts[i : i + self.batch_size]))
         return np.concatenate(results)

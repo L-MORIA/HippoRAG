@@ -1,0 +1,61 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        files: ^(src|tests)/
+      - id: end-of-file-fixer
+        files: ^(src|tests)/
+      - id: check-yaml
+        files: ^(src|tests)/
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-json
+        files: ^(src|tests)/
+      - id: check-merge-conflict
+      - id: debug-statements
+        files: ^(src|tests)/
+      - id: mixed-line-ending
+        files: ^(src|tests)/
+
+  - repo: https://github.com/psf/black
+    rev: 26.3.1
+    hooks:
+      - id: black
+        # language_version не пинаем: таргеты заданы в [tool.black]/[tool.ruff],
+        # а пин на python3.10 ломает хук на машинах без 3.10 (замечание 2)
+        args: ['--line-length=100']
+        files: ^(src|tests)/
+
+  - repo: https://github.com/PyCQA/isort
+    rev: 8.0.1
+    hooks:
+      - id: isort
+        args: ['--profile=black', '--line-length=100']
+        files: ^(src|tests)/
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.0
+    hooks:
+      - id: ruff
+        # правила select/ignore — в [tool.ruff.lint] pyproject.toml.
+        # Область ВСЕХ хуков = область CI (src/ tests/): несогласованность ворот
+        # качества была корнем R-1'/замечания 1, а не дефектом одного хука
+        files: ^(src|tests)/
+
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.5
+    hooks:
+      - id: bandit
+        args: ['-c', '.bandit']
+        additional_dependencies: ['pbr']
+        files: ^(src|tests)/
+
+ci:
+  autofix_commit_msg: 'chore: auto fixes from pre-commit hooks'
+  autofix_prs: true
+  autoupdate_branch: ''
+  autoupdate_commit_msg: 'chore: pre-commit autoupdate'
+  autoupdate_schedule: weekly
+  skip: []
+  submodules: false

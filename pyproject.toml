@@ -1,0 +1,206 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hipporag"
+version = "2.0.0-alpha.4"
+description = "Graph-based Retrieval-Augmented Generation framework for multi-hop question answering"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "HippoRAG Contributors"}
+]
+keywords = ["rag", "retrieval", "augmented", "generation", "graph", "llm", "qa"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "pandas>=2.0.0",
+    "pyarrow>=14.0.0",
+    "torch>=2.5.1",
+    "transformers>=4.45.2",
+    "sentence-transformers>=2.2.0",
+    "openai>=1.91.1",
+    "litellm>=1.73.1",
+    "boto3>=1.26.0",
+    "networkx>=3.4.2",
+    "python-igraph>=0.11.8",
+    "gritlm>=1.0.2",
+    "pdfplumber>=0.9.0",
+    "PyMuPDF>=1.23.0",
+    "pytesseract>=0.3.10",
+    "Pillow>=10.0.0",
+    "fastapi>=0.68.0",
+    "uvicorn>=0.15.0",
+    "python-multipart>=0.0.6",
+    "pydantic>=2.10.4",
+    "pydantic-settings>=2.0.0",
+    "tiktoken>=0.7.0",
+    "tqdm>=4.65.0",
+    "einops>=0.7.0",
+    "python-dotenv>=1.0.0",
+    "filelock>=3.0.0",
+    "tenacity>=8.0.0",
+    "httpx>=0.25.0",
+    "requests>=2.31.0",
+    "rank-bm25>=0.2.2",
+]
+
+[project.optional-dependencies]
+ru = [
+    "spacy>=3.7.0",
+    # Модель ставится отдельно: python -m spacy download ru_core_news_sm
+]
+offline = [
+    # Offline-режим OpenIE отключён в этой сборке; extra — для будущей реанимации
+    "vllm>=0.6.6",
+]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.5.0",
+    "black==26.3.1",
+    "flake8>=6.0.0",
+    "isort==8.0.1",
+    "mypy>=1.5.0",
+    "pre-commit>=3.3.0",
+    "sphinx>=7.0.0",
+    "sphinx-rtd-theme>=1.3.0",
+]
+
+docs = [
+    "sphinx>=7.0.0",
+    "sphinx-rtd-theme>=1.3.0",
+    "sphinx-autodoc-typehints>=1.24.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/OSU-NLP-Group/HippoRAG"
+Documentation = "https://hipporag.readthedocs.io"
+Repository = "https://github.com/OSU-NLP-Group/HippoRAG.git"
+Issues = "https://github.com/OSU-NLP-Group/HippoRAG/issues"
+
+[tool.ruff]
+target-version = "py310"
+# tests/standalone — ручные сценарии, не библиотечный код; archive — неактивные материалы
+extend-exclude = ["tests/standalone", "archive", "outputs", "htmlcov"]
+
+[tool.ruff.lint]
+# E9 — синтаксис, F — pyflakes (реальные ошибки), B — bugbear
+select = ["E9", "F", "B"]
+# Известный стилистический B-долг (не влияет на корректность):
+# B905 zip(strict=), B904 raise-from, B027 пустые методы ABC, B007/B006/B008 сигнатуры
+ignore = ["B905", "B904", "B027", "B007", "B006", "B008"]
+
+[tool.black]
+line-length = 100
+target-version = ['py310', 'py311', 'py312']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+  | outputs
+  | data
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+skip_gitignore = true
+known_first_party = ["hipporag"]
+known_third_party = ["torch", "transformers", "fastapi", "pydantic"]
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+strict_equality = true
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+    "torch.*",
+    "transformers.*",
+    "vllm.*",
+    "sentence_transformers.*",
+    "networkx.*",
+    "igraph.*",
+    "pdfplumber.*",
+    "fitz.*",
+    "pytesseract.*",
+    "PIL.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --strict-markers --tb=short"
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "slow: Slow running tests",
+    "requires_api: Tests requiring API keys",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["src/hipporag"]
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    "*/__init__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]

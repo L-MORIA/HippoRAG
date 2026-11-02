@@ -38,6 +38,95 @@ categories, bringing it one step closer to true long-term memory.
 
 ----
 
+## Astrology RAG Extension
+
+This repository has been extended with support for indexing Russian astrology PDFs with citation metadata.
+
+### Configuration
+
+- **LLM**: `google/gemma-4-e4b` via LM Studio at `http://localhost:1234/v1`
+- **Embedding model**: `sentence-transformers/paraphrase-multilingual-mpnet-base-v2`
+- **PDF parser**: PyMuPDF (`fitz`) — replaced pdfplumber because it dropped spaces in Russian text
+- **NER/Fact extraction workers**: 15 concurrent (configurable in `openie_openai.py`)
+- **Index dir**: `outputs/astrology/gemma-4-e4b_sentence-transformers_paraphrase-multilingual-mpnet-base-v2/`
+
+### Key Features
+
+1. **PDF Ingestion Layer**:
+   - Automatic detection of text-based vs scanned PDFs
+   - OCR support for scanned documents using Tesseract
+   - Smart chunking with metadata preservation (source file, document title, page number, section)
+
+2. **Resumable Indexing**:
+   - If indexing crashes/times out, re-run `index_full.bat` — it resumes from the last saved state
+   - NER and triple results are cached to `openie_results_ner_<model>.json`
+   - Already-processed chunks are skipped automatically
+   - Assertion in `HippoRAG.py` (line ~306) was softened: stale results from previous runs are filtered out instead of crashing
+
+3. **Enhanced Embedding Store**:
+   - Metadata-aware storage for citation information
+   - Support for source tracking in retrieved documents
+
+4. **Citation-Aware Retrieval & QA**:
+   - Retrieval results include citation metadata
+   - QA prompts formatted with source information
+   - Dedicated astrology prompt template
+
+### Usage
+
+#### PDF Ingestion
+
+```python
+from src.hipporag import HippoRAG
+from src.hipporag.utils.config_utils import BaseConfig
+
+# Initialize with config
+config = BaseConfig()
+hipporag = HippoRAG(global_config=config)
+
+# Index PDF documents
+pdf_paths = ["book1.pdf", "article1.pdf"]
+hipporag.index_pdfs(pdf_paths)
+```
+
+#### Search with Citations
+
+```python
+# Perform search with citations
+results = hipporag.rag_qa(queries=["What does Mars in Aries signify?"])
+
+for result in results:
+    print(f"Answer: {result.answer}")
+    print("Citations:")
+    for citation in result.citations:
+        print(f"- {citation.doc_title}, p. {citation.page_num}")
+```
+
+#### Web API Server
+
+Start the FastAPI server:
+
+```bash
+uvicorn src.hipporag.search_api.server:app --host 0.0.0.0 --port 8000
+```
+
+Endpoints:
+- POST /ingest - Upload and index PDF files
+- POST /search - Search with questions
+- GET /health - Health check
+
+### Requirements
+
+Additional dependencies for PDF processing:
+```txt
+PyMuPDF>=1.18.0
+pytesseract>=0.3.8
+Pillow>=8.3.0
+fastapi>=0.68.0,<0.69.0
+uvicorn>=0.15.0,<0.16.0
+python-multipart>=0.0.5
+```
+
 ## Installation
 
 ```sh
@@ -82,9 +171,9 @@ llm_model_name = 'gpt-4o-mini' # Any OpenAI model name
 embedding_model_name = 'nvidia/NV-Embed-v2'# Embedding model name (NV-Embed, GritLM or Contriever for now)
 
 #Startup a HippoRAG instance
-hipporag = HippoRAG(save_dir=save_dir, 
+hipporag = HippoRAG(save_dir=save_dir,
                     llm_model_name=llm_model_name,
-                    embedding_model_name=embedding_model_name) 
+                    embedding_model_name=embedding_model_name)
 
 #Run indexing
 hipporag.index(docs=docs)
@@ -118,7 +207,7 @@ gold_docs = [
     "Montebello is a part of Rockland County."]
 ]
 
-rag_results = hipporag.rag_qa(queries=queries, 
+rag_results = hipporag.rag_qa(queries=queries,
                               gold_docs=gold_docs,
                               gold_answers=answers)
 ```
@@ -126,12 +215,12 @@ rag_results = hipporag.rag_qa(queries=queries,
 #### Example (OpenAI Compatible Embeddings)
 
 If you want to use LLMs and Embeddings Compatible to OpenAI, please use the following methods.</p>
-    
+
 ```python
-hipporag = HippoRAG(save_dir=save_dir, 
+hipporag = HippoRAG(save_dir=save_dir,
     llm_model_name='Your LLM Model name',
     llm_base_url='Your LLM Model url',
-    embedding_model_name='Your Embedding model name',  
+    embedding_model_name='Your Embedding model name',
     embedding_base_url='Your Embedding model url')
 ```
 
@@ -149,10 +238,10 @@ export HF_HOME=<path to Huggingface home directory>
 conda activate hipporag  # vllm should be in this environment
 
 # Tune gpu-memory-utilization or max_model_len to fit your GPU memory, if OOM occurs
-vllm serve meta-llama/Llama-3.3-70B-Instruct --tensor-parallel-size 2 --max_model_len 4096 --gpu-memory-utilization 0.95 
+vllm serve meta-llama/Llama-3.3-70B-Instruct --tensor-parallel-size 2 --max_model_len 4096 --gpu-memory-utilization 0.95
 ```
 
-2. Now you can use very similar code to the one above to use `hipporag`: 
+2. Now you can use very similar code to the one above to use `hipporag`:
 
 ```python
 save_dir = 'outputs'# Define save directory for HippoRAG objects (each LLM/Embedding model combination will create a new subdirectory)
@@ -170,17 +259,17 @@ hipporag = HippoRAG(save_dir=save_dir,
 
 ## Testing
 
-When making a contribution to HippoRAG, please run the scripts below to ensure that your changes do not result in unexpected behavior from our core modules. 
+When making a contribution to HippoRAG, please run the scripts below to ensure that your changes do not result in unexpected behavior from our core modules.
 
 These scripts test for indexing, graph loading, document deletion and incremental updates to a HippoRAG object.
 
 ### OpenAI Test
 
-To test HippoRAG with an OpenAI LLM and embedding model, simply run the following. 
+To test HippoRAG with an OpenAI LLM and embedding model, simply run the following.
 The cost of this test will be negligible.
 
 ```sh
-export OPENAI_API_KEY=<your openai api key> 
+export OPENAI_API_KEY=<your openai api key>
 
 conda activate hipporag
 
@@ -252,7 +341,7 @@ export HF_HOME=<path to Huggingface home directory>
 conda activate hipporag  # vllm should be in this environment
 
 # Tune gpu-memory-utilization or max_model_len to fit your GPU memory, if OOM occurs
-vllm serve meta-llama/Llama-3.3-70B-Instruct --tensor-parallel-size 2 --max_model_len 4096 --gpu-memory-utilization 0.95 
+vllm serve meta-llama/Llama-3.3-70B-Instruct --tensor-parallel-size 2 --max_model_len 4096 --gpu-memory-utilization 0.95
 ```
 
 2. Use another GPUs to run the main program in another terminal.
@@ -267,7 +356,7 @@ python main.py --dataset $dataset --llm_base_url http://localhost:8000/v1 --llm_
 
 #### Advanced: Run with vLLM offline batch
 
-vLLM offers an [offline batch mode](https://docs.vllm.ai/en/latest/getting_started/quickstart.html#offline-batched-inference) for faster inference, which could bring us more than 3x faster indexing compared to vLLM online server. 
+vLLM offers an [offline batch mode](https://docs.vllm.ai/en/latest/getting_started/quickstart.html#offline-batched-inference) for faster inference, which could bring us more than 3x faster indexing compared to vLLM online server.
 
 1. Use the following command to run the main program with vLLM offline batch mode.
 
@@ -405,7 +494,7 @@ When preparing your data, you may need to chunk each passage, as longer passage 
 
 ## Contact
 
-Questions or issues? File an issue or contact 
+Questions or issues? File an issue or contact
 [Bernal Jiménez Gutiérrez](mailto:jimenezgutierrez.1@osu.edu),
 [Yiheng Shu](mailto:shu.251@osu.edu),
 [Yu Su](mailto:su.809@osu.edu),
@@ -418,13 +507,13 @@ If you find this work useful, please consider citing our papers:
 ### HippoRAG 2
 ```
 @misc{gutiérrez2025ragmemorynonparametriccontinual,
-      title={From RAG to Memory: Non-Parametric Continual Learning for Large Language Models}, 
+      title={From RAG to Memory: Non-Parametric Continual Learning for Large Language Models},
       author={Bernal Jiménez Gutiérrez and Yiheng Shu and Weijian Qi and Sizhe Zhou and Yu Su},
       year={2025},
       eprint={2502.14802},
       archivePrefix={arXiv},
       primaryClass={cs.CL},
-      url={https://arxiv.org/abs/2502.14802}, 
+      url={https://arxiv.org/abs/2502.14802},
 }
 ```
 
@@ -432,7 +521,7 @@ If you find this work useful, please consider citing our papers:
 
 ```
 @inproceedings{gutiérrez2024hipporag,
-      title={HippoRAG: Neurobiologically Inspired Long-Term Memory for Large Language Models}, 
+      title={HippoRAG: Neurobiologically Inspired Long-Term Memory for Large Language Models},
       author={Bernal Jiménez Gutiérrez and Yiheng Shu and Yu Gu and Michihiro Yasunaga and Yu Su},
       booktitle={The Thirty-eighth Annual Conference on Neural Information Processing Systems},
       year={2024},

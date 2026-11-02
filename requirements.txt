@@ -1,17 +1,4 @@
-openai==1.91.1
-litellm==1.73.1
-vllm==0.6.6.post1
-gritlm==1.0.2
-torch==2.5.1
-transformers==4.45.2
-networkx==3.4.2
-pydantic==2.10.4
-python_igraph==0.11.8
-tenacity==8.5.0
-tiktoken==0.7.0
-nest_asyncio
-numpy
-scipy
-tqdm
-einops
-boto3
+# Единый источник зависимостей — pyproject.toml (решение по развилке №1 сводного аудита).
+# Установка:            pip install -e .[dev]
+# Русский NER (скрипты):pip install -e .[ru] && python -m spacy download ru_core_news_sm
+-e .

@@ -10,5 +10,3 @@
     - A str with or without ${}-like placeholders for filling values (will be converted with Template(...)) OR
     - A Template instance OR
     - A chat history (List[dict[str, Any]]) with each dict is like {"role": "system"/"user"/"assistant", "content": the above two option items}.
-
-

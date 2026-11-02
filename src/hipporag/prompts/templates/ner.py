@@ -1,4 +1,4 @@
-ner_system = """Your task is to extract named entities from the given paragraph. 
+ner_system = """Your task is to extract named entities from the given paragraph.
 Respond with a JSON list of entities.
 """
 
@@ -18,5 +18,5 @@ prompt_template = [
     {"role": "system", "content": ner_system},
     {"role": "user", "content": one_shot_ner_paragraph},
     {"role": "assistant", "content": one_shot_ner_output},
-    {"role": "user", "content": "${passage}"}
+    {"role": "user", "content": "${passage}"},
 ]

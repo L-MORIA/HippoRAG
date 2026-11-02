@@ -1,0 +1,14 @@
+# Конфигурация bandit — формат YAML (bandit -c ждёт YAML).
+# Список tests не задаём: bandit запускает все встроенные тесты,
+# а перечисление ID из старого INI валилось на несуществующих (B270 и др.)
+exclude_dirs:
+  - "/tests"
+  - "/venv"
+  - "/.venv"
+  - "/outputs"
+  - "/data"
+skips: []
+assert_used:
+  skips:
+    - "*/test_*.py"
+    - "*/tests.py"

@@ -21,3 +21,14 @@ data/
 clear_outputs_and_logs.sh
 # Ignore the env file
 .env
+
+# Артефакты инструментов и локальные данные (S-40, сводный аудит)
+htmlcov/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+models/
+archive/
+*.egg-info/
+temp_uploads/

@@ -1,142 +1,3139 @@
 import os
-from typing import List
+import re
+import sys
 import json
+import time
+from pathlib import Path
+import numpy as np
+from dotenv import load_dotenv
+from rank_bm25 import BM25Okapi
 
-from src.hipporag.HippoRAG import HippoRAG
-from src.hipporag.utils.misc_utils import string_to_bool
-from src.hipporag.utils.config_utils import BaseConfig
+load_dotenv()
 
-import argparse
+from hipporag import HippoRAG
+from hipporag.utils.config_utils import BaseConfig
+from hipporag.utils.misc_utils import min_max_normalize
 
-# os.environ["LOG_LEVEL"] = "DEBUG"
+SAVE_DIR = 'outputs/astrology_test'
+LLM_NAME = os.getenv('LLM_NAME', 'gemma-4-e4b')
+LLM_BASE_URL = os.getenv('LLM_BASE_URL', 'http://localhost:1234/v1')
+EMBEDDING_MODEL = 'sentence-transformers/paraphrase-multilingual-mpnet-base-v2'
+
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import logging
+logging.basicConfig(level=logging.WARNING)
 
-def get_gold_docs(samples: List, dataset_name: str = None) -> List:
-    gold_docs = []
-    for sample in samples:
-        if 'supporting_facts' in sample:  # hotpotqa, 2wikimultihopqa
-            gold_title = set([item[0] for item in sample['supporting_facts']])
-            gold_title_and_content_list = [item for item in sample['context'] if item[0] in gold_title]
-            if dataset_name.startswith('hotpotqa'):
-                gold_doc = [item[0] + '\n' + ''.join(item[1]) for item in gold_title_and_content_list]
-            else:
-                gold_doc = [item[0] + '\n' + ' '.join(item[1]) for item in gold_title_and_content_list]
-        elif 'contexts' in sample:
-            gold_doc = [item['title'] + '\n' + item['text'] for item in sample['contexts'] if item['is_supporting']]
-        else:
-            assert 'paragraphs' in sample, "`paragraphs` should be in sample, or consider the setting not to evaluate retrieval"
-            gold_paragraphs = []
-            for item in sample['paragraphs']:
-                if 'is_supporting' in item and item['is_supporting'] is False:
-                    continue
-                gold_paragraphs.append(item)
-            gold_doc = [item['title'] + '\n' + (item['text'] if 'text' in item else item['paragraph_text']) for item in gold_paragraphs]
+STOP_WORDS = {'что', 'как', 'все', 'она', 'так', 'его', 'только', 'мне', 'было', 'меня',
+              'нет', 'для', 'квартир', 'дом', 'комнат', 'себе', 'этот', 'можно', 'если',
+              'чтобы', 'когда', 'даже', 'уже', 'есть', 'при', 'том', 'или', 'из', 'его'}
 
-        gold_doc = list(set(gold_doc))
-        gold_docs.append(gold_doc)
-    return gold_docs
+SENTENCE_START = re.compile(r'^[А-ЯA-Z«"\']')
+
+# Словарь синонимов и связанных терминов для Query Expansion
+SYNONYM_MAP = {
+    # Знаки зодиака → синонимы, латиница, связанные термины
+    'овен': ['овен', 'овна', 'овну', 'овном', 'aries', 'марс', 'плита', 'прихожая', 'первый знак', 'стихия огня'],
+    'телец': ['телец', 'тельца', 'тельцу', 'тельцом', 'taurus', 'венера', 'кладовка', 'шкаф', 'второй знак', 'стихия земли'],
+    'близнецы': ['близнецы', 'близнецов', 'gemini', 'меркурий', 'коридор', 'телефон', 'третий знак', 'стихия воздуха'],
+    'рак': ['рак', 'рака', 'раку', 'cancer', 'луна', 'ванная', 'баня', 'четвертый знак', 'стихия воды'],
+    'лев': ['лев', 'льва', 'льву', 'leo', 'солнце', 'гостиная', 'зал', 'пятый знак', 'стихия огня'],
+    'дева': ['дева', 'девы', 'virgo', 'меркурий', 'кухня', 'столовая', 'шестой знак', 'стихия земли'],
+    'весы': ['весы', 'весов', 'libra', 'венера', 'коридор общий', 'седьмой знак', 'стихия воздуха'],
+    'скорпион': ['скорпион', 'скорпиона', 'scorpio', 'плутон', 'туалет', 'подвал', 'восьмой знак', 'стихия воды', 'марс'],
+    'стрелец': ['стрелец', 'стрельца', 'sagittarius', 'юпитер', 'балкон', 'лоджия', 'девятый знак', 'стихия огня'],
+    'козерог': ['козерог', 'козерога', 'capricorn', 'сатурн', 'прихожая вход', 'десятый знак', 'стихия земли'],
+    'водолей': ['водолей', 'водолея', 'aquarius', 'уран', 'спальня', 'одиннадцатый знак', 'стихия воздуха'],
+    'рыбы': ['рыбы', 'рыб', 'pisces', 'нептун', 'кладовая', 'холодильник', 'двенадцатый знак', 'стихия воды'],
+
+    # Планеты → зоны квартиры
+    'марс': ['марс', 'марса', 'плита', 'прихожая', 'спортзал', 'огонь', 'энергия', 'напор'],
+    'венера': ['венера', 'венеры', 'кладовка', 'шкаф', 'холодильник', 'эстетика', 'красота', 'комфорт', 'деньги'],
+    'меркурий': ['меркурий', 'меркурия', 'коридор', 'телефон', 'связь', 'коммуникация', 'общение'],
+    'юпитер': ['юпитер', 'юпитера', 'балкон', 'лоджия', 'библиотека', 'терраса', 'расширение', 'удача'],
+    'сатурн': ['сатурн', 'сатурна', 'входная дверь', 'порог', 'крыльцо', 'ограничение', 'время', 'структура'],
+    'уран': ['уран', 'урана', 'спальня', 'техника', 'новшество', 'электрика', 'нестандартность'],
+    'нептун': ['нептун', 'нептуна', 'кладовая', 'подвал', 'тайна', 'подсознание', 'вода'],
+    'плутон': ['плутон', 'плутона', 'туалет', 'подвал', 'трансформация', 'старьё', 'экстрим'],
+    'луна': ['луна', 'луны', 'ванная', 'баня', 'семья', 'род', 'архив', 'эмоции', 'привычки'],
+    'солнце': ['солнце', 'солнца', 'гостиная', 'зал', 'жизнь', 'творчество', 'успех', 'здоровье'],
+
+    # Астрологические дома
+    '1 дом': ['первый дом', '1 дом', 'асцендент', 'внешность', 'личность', 'я'],
+    '2 дом': ['второй дом', '2 дом', 'деньги', 'имущество', 'ценности', 'доход'],
+    '3 дом': ['третий дом', '3 дом', 'общение', 'соседи', 'поездки', 'информация'],
+    '4 дом': ['четвертый дом', '4 дом', 'ic', 'семья', 'род', 'дом', 'родители', 'недвижимость'],
+    '5 дом': ['пятый дом', '5 дом', 'любовь', 'дети', 'творчество', 'хобби', 'романтика'],
+    '6 дом': ['шестой дом', '6 дом', 'здоровье', 'работа', 'служба', 'повседневность'],
+    '7 дом': ['седьмой дом', '7 дом', 'десцендент', 'брак', 'партнёр', 'отношения'],
+    '8 дом': ['восьмой дом', '8 дом', 'кризис', 'перемены', 'секс', 'чужие деньги', 'наследство'],
+    '9 дом': ['девятый дом', '9 дом', 'путешествия', 'образование', 'философия', 'религия'],
+    '10 дом': ['десятый дом', '10 дом', 'мс', 'карьера', 'статус', 'профессия', 'цель'],
+    '11 дом': ['одиннадцатый дом', '11 дом', 'друзья', 'единомышленники', 'надежды', 'проекты'],
+    '12 дом': ['двенадцатый дом', '12 дом', 'уединение', 'отдых', 'подсознание', 'тайны'],
+
+    # Зоны квартиры (фэншуй) → синонимы + связанные планеты
+    'прихожая': ['прихожая', 'прихожей', 'прихожую', 'холл', 'коридор входной', 'входная зона', 'порог', 'марс'],
+    'плита': ['плита', 'плиты', 'плиту', 'плитой', 'плите', 'прихожая', 'марс', 'овен', 'кухня'],
+    'кухня': ['кухня', 'кухни', 'кухню', 'кухне', 'кухонный', 'столовая', 'место готовки', 'зона питания', 'плита', 'дева', 'меркурий'],
+    'спальня': ['спальня', 'спальни', 'спальню', 'спальне', 'спальный', 'комната отдыха', 'место сна'],
+    'гостиная': ['гостиная', 'гостиной', 'гостиную', 'зал', 'общая комната', 'приём гостей'],
+    'ванная': ['ванная', 'ванной', 'ванную', 'ванна', 'душ', 'санузел', 'вода'],
+    'туалет': ['туалет', 'туалета', 'туалету', 'сортир', 'уборная', 'санузел'],
+    'коридор': ['коридор', 'коридора', 'коридору', 'коридором', 'проход', 'анфилада', 'соединительная зона'],
+    'кладовка': ['кладовка', 'кладовки', 'кладовку', 'кладовке', 'кладовая', 'шкаф', 'хранение', 'венера', 'телец'],
+    'шкаф': ['шкаф', 'шкафа', 'шкафу', 'шкафом', 'шкафы', 'кладовка', 'хранение', 'венера', 'телец'],
+    'балкон': ['балкон', 'балкона', 'балкону', 'балконом', 'лоджия', 'терраса'],
+    'дверь': ['дверь', 'двери', 'дверью', 'вход', 'входная дверь'],
+
+    # Обратные связи: падежные формы → базовые слова
+    'плиту': ['плита', 'плиты', 'плитой', 'прихожая', 'марс', 'овен', 'кухня'],
+    'плиты': ['плита', 'плиту', 'плитой', 'прихожая', 'марс', 'овен', 'кухня'],
+    'плите': ['плита', 'плиты', 'плиту', 'прихожая', 'марс', 'овен', 'кухня'],
+    'прихожей': ['прихожая', 'холл', 'коридор входной', 'марс'],
+    'прихожую': ['прихожая', 'холл', 'коридор входной', 'марс'],
+    'кладовки': ['кладовка', 'кладовая', 'шкаф', 'хранение', 'венера', 'телец'],
+    'кладовку': ['кладовка', 'кладовая', 'шкаф', 'хранение', 'венера', 'телец'],
+    'шкафа': ['шкаф', 'шкафу', 'шкафом', 'шкафы', 'кладовка', 'хранение', 'венера', 'телец'],
+    'шкафу': ['шкаф', 'шкафа', 'шкафом', 'шкафы', 'кладовка', 'хранение', 'венера', 'телец'],
+
+    # Планета → все планеты (для запросов "какая планета отвечает за...")
+    'планета': ['планета', 'планеты', 'планету', 'планетой', 'марс', 'венера', 'меркурий',
+                'юпитер', 'сатурн', 'уран', 'нептун', 'плутон', 'луна', 'солнце'],
+    'планеты': ['планета', 'планету', 'планетой', 'марс', 'венера', 'меркурий',
+                'юпитер', 'сатурн', 'уран', 'нептун', 'плутон', 'луна', 'солнце'],
+    'планету': ['планета', 'планеты', 'планетой', 'марс', 'венера', 'меркурий',
+                'юпитер', 'сатурн', 'уран', 'нептун', 'плутон', 'луна', 'солнце'],
+
+    # Ключевые понятия
+    'ремонт': ['ремонт', 'ремонта', 'ремонту', 'ремонте', 'ремонтный', 'отделка',
+               'перепланировка', 'обновление', 'строительство', 'преображение', 'шаги ремонта', 'этапы ремонта'],
+    'ремонта': ['ремонт', 'ремонту', 'ремонте', 'ремонтный', 'отделка', 'перепланировка', 'шаги ремонта'],
+    'ремонту': ['ремонт', 'ремонта', 'ремонте', 'отделка', 'перепланировка'],
+    'ремонте': ['ремонт', 'ремонта', 'ремонту', 'отделка', 'перепланировка'],
+    'фэншуй': ['фэншуй', 'фэн-шуй', 'феншуй', 'багуа', 'ци', 'гармония', 'баланс',
+               'энергия дома', 'организация пространства'],
+    'захламление': ['захламление', 'хлам', 'старьё', 'мусор', 'беспорядок', 'барахло', 'расхламление'],
+    'интерьер': ['интерьер', 'интерьера', 'интерьеру', 'дизайн', 'оформление', 'обстановка', 'убранство', 'стиль'],
+    'астрология': ['астрология', 'астрологии', 'астрофэншуй', 'гороскоп', 'натальная карта', 'зодиак'],
+}
 
 
-def get_gold_answers(samples):
-    gold_answers = []
-    for sample_idx in range(len(samples)):
-        gold_ans = None
-        sample = samples[sample_idx]
+def _expand_query(q_lower, terms):
+    """Расширить запрос синонимами из словаря.
+    Автоматически нормализует термины: убирает пунктуацию, пробует падежные формы."""
+    import re as _re
+    expanded = set(terms)
+    for term in terms:
+        # Пробуем исходный термин
+        candidates = [term]
+        # Убираем пунктуацию
+        clean = _re.sub(r'[^\w\s]', '', term)
+        if clean != term and len(clean) > 2:
+            candidates.append(clean)
+        for cand in candidates:
+            if cand in SYNONYM_MAP:
+                for syn in SYNONYM_MAP[cand]:
+                    if len(syn) > 2 and syn not in expanded:
+                        expanded.add(syn)
+                break
+    return list(expanded)
 
-        if 'answer' in sample or 'gold_ans' in sample:
-            gold_ans = sample['answer'] if 'answer' in sample else sample['gold_ans']
-        elif 'reference' in sample:
-            gold_ans = sample['reference']
-        elif 'obj' in sample:
-            gold_ans = set(
-                [sample['obj']] + [sample['possible_answers']] + [sample['o_wiki_title']] + [sample['o_aliases']])
-            gold_ans = list(gold_ans)
-        assert gold_ans is not None
-        if isinstance(gold_ans, str):
-            gold_ans = [gold_ans]
-        assert isinstance(gold_ans, list)
-        gold_ans = set(gold_ans)
-        if 'answer_aliases' in sample:
-            gold_ans.update(sample['answer_aliases'])
 
-        gold_answers.append(gold_ans)
+# Знаки зодиака + все падежные формы (для поиска по любому падежу)
+ZODIAC_SIGNS = ['овен', 'телец', 'близнецы', 'рак', 'лев', 'дева',
+                'весы', 'скорпион', 'стрелец', 'козерог', 'водолей', 'рыбы']
+# Все возможные падежные формы знаков зодиака
+ZODIAC_FORMS = {
+    'овен': ['овен', 'овна', 'овну', 'овном', 'овне', 'овны', 'овнов'],
+    'телец': ['телец', 'тельца', 'тельцу', 'тельцом', 'тельце', 'тельцы',
+              'тельцов', 'тельцам', 'тельцами', 'тельцах'],
+    'близнецы': ['близнецы', 'близнецов', 'близнецам', 'близнецами', 'близнецах'],
+    'рак': ['рак', 'рака', 'раку', 'раком', 'раке', 'раки', 'раков'],
+    'лев': ['лев', 'льва', 'льву', 'львом', 'льве', 'львы', 'львов'],
+    'дева': ['дева', 'девы', 'деве', 'деву', 'девой', 'дев'],
+    'весы': ['весы', 'весов', 'весам', 'весами', 'весах'],
+    'скорпион': ['скорпион', 'скорпиона', 'скорпиону', 'скорпионом', 'скорпионе',
+                 'скорпионы', 'скорпионов'],
+    'стрелец': ['стрелец', 'стрельца', 'стрельцу', 'стрельцом', 'стрельце',
+                'стрельцы', 'стрельцов'],
+    'козерог': ['козерог', 'козерога', 'козерогу', 'козерогом', 'козероге',
+                'козероги', 'козерогов'],
+    'водолей': ['водолей', 'водолея', 'водолею', 'водолеем', 'водолее',
+                'водолеи', 'водолеев'],
+    'рыбы': ['рыбы', 'рыб', 'рыбам', 'рыбами', 'рыбах'],
+}
+# Строим маппинг: любая форма → именительный падеж
+FORM_TO_SIGN = {}
+for nominative, forms in ZODIAC_FORMS.items():
+    for f in forms:
+        FORM_TO_SIGN[f] = nominative
 
-    return gold_answers
+# Планеты и ключевые термины для расширенного анализа
+ASTRO_TERMS = ZODIAC_SIGNS + ['марс', 'венера', 'меркурий', 'юпитер', 'сатурн',
+                               'уран', 'нептун', 'плутон', 'луна', 'солнце',
+                               'асцендент', 'десцендент', 'фэншуй', 'багуа']
 
-def main():
-    parser = argparse.ArgumentParser(description="HippoRAG retrieval and QA")
-    parser.add_argument('--dataset', type=str, default='musique', help='Dataset name')
-    parser.add_argument('--llm_base_url', type=str, default='https://api.openai.com/v1', help='LLM base URL')
-    parser.add_argument('--llm_name', type=str, default='gpt-4o-mini', help='LLM name')
-    parser.add_argument('--embedding_name', type=str, default='nvidia/NV-Embed-v2', help='embedding model name')
-    parser.add_argument('--force_index_from_scratch', type=str, default='false',
-                        help='If set to True, will ignore all existing storage files and graph data and will rebuild from scratch.')
-    parser.add_argument('--force_openie_from_scratch', type=str, default='false', help='If set to False, will try to first reuse openie results for the corpus if they exist.')
-    parser.add_argument('--openie_mode', choices=['online', 'offline'], default='online',
-                        help="OpenIE mode, offline denotes using VLLM offline batch mode for indexing, while online denotes")
-    parser.add_argument('--save_dir', type=str, default='outputs', help='Save directory')
-    args = parser.parse_args()
 
-    dataset_name = args.dataset
-    save_dir = args.save_dir
-    llm_base_url = args.llm_base_url
-    llm_name = args.llm_name
-    if save_dir == 'outputs':
-        save_dir = save_dir + '/' + dataset_name
-    else:
-        save_dir = save_dir + '_' + dataset_name
+def reformulate_query(hipporag, query):
+    """Улучшить запрос через LLM (прямой вызов LM Studio API)."""
+    import httpx
+    api_url = LLM_BASE_URL.replace('/v1', '') if '/v1' in LLM_BASE_URL else LLM_BASE_URL
 
-    corpus_path = f"reproduce/dataset/{dataset_name}_corpus.json"
-    with open(corpus_path, "r") as f:
-        corpus = json.load(f)
-
-    docs = [f"{doc['title']}\n{doc['text']}" for doc in corpus]
-
-    force_index_from_scratch = string_to_bool(args.force_index_from_scratch)
-    force_openie_from_scratch = string_to_bool(args.force_openie_from_scratch)
-
-    # Prepare datasets and evaluation
-    samples = json.load(open(f"reproduce/dataset/{dataset_name}.json", "r"))
-    all_queries = [s['question'] for s in samples]
-
-    gold_answers = get_gold_answers(samples)
+    # Проверка: отвечает ли LM Studio
     try:
-        gold_docs = get_gold_docs(samples, dataset_name)
-        assert len(all_queries) == len(gold_docs) == len(gold_answers), "Length of queries, gold_docs, and gold_answers should be the same."
-    except:
-        gold_docs = None
+        r = httpx.get(f"{api_url}/v1/models", timeout=3)
+        if r.status_code != 200:
+            print(f"\n  ⚠️ LM Studio не отвечает (статус {r.status_code}).")
+            print("  ⚠️ Переформулировка запроса через LLM недоступна.")
+            print("  ⚠️ Поиск продолжается без переформулировки.\n")
+            return query
+    except (httpx.ConnectError, httpx.TimeoutException):
+        print("\n  ⚠️ LM Studio не запущен или не отвечает.")
+        print("  ⚠️ Переформулировка запроса через LLM невозможна.")
+        print("  ⚠️ Чтобы включить — запустите LM Studio и загрузите модель.")
+        print("  ⚠️ Поиск продолжается без переформулировки.\n")
+        return query
 
-    config = BaseConfig(
-        save_dir=save_dir,
-        llm_base_url=llm_base_url,
-        llm_name=llm_name,
-        dataset=dataset_name,
-        embedding_model_name=args.embedding_name,
-        force_index_from_scratch=force_index_from_scratch,  # ignore previously stored index, set it to False if you want to use the previously stored index and embeddings
-        force_openie_from_scratch=force_openie_from_scratch,
-        rerank_dspy_file_path="src/hipporag/prompts/dspy_prompts/filter_llama3.3-70B-Instruct.json",
-        retrieval_top_k=200,
-        linking_top_k=5,
-        max_qa_steps=3,
-        qa_top_k=5,
-        graph_type="facts_and_sim_passage_node_unidirectional",
-        embedding_batch_size=8,
-        max_new_tokens=None,
-        corpus_len=len(corpus),
-        openie_mode=args.openie_mode
+    # Прямой вызов LM Studio API (chat completions)
+    try:
+        payload = {
+            "model": LLM_NAME,
+            "messages": [
+                {"role": "system", "content": (
+                    "Ты — эксперт по астрологии и фэншуй. "
+                    "Улучши поисковый запрос: выдели ключевые термины "
+                    "(знак зодиака, планета, зона дома, действие). "
+                    "Ответь ОДНИМ предложением (3-10 слов). Без пояснений."
+                )},
+                {"role": "user", "content": f"Запрос: {query}"}
+            ],
+            "max_tokens": 2048,
+            "temperature": 0,
+        }
+        r = httpx.post(f"{api_url}/v1/chat/completions", json=payload, timeout=300)
+        if r.status_code == 200:
+            data = r.json()
+            msg = data["choices"][0]["message"]
+            finish = data["choices"][0].get("finish_reason", "")
+
+            content = (msg.get("content") or "").strip().strip('"\'')
+            # У reasoning-моделей (gemma-4-e4b) ответ в reasoning_content, если content пуст
+            if not content and finish == "stop":
+                rc = msg.get("reasoning_content", "")
+                if rc:
+                    lines = [l.strip() for l in rc.split('\n') if l.strip()]
+                    content = lines[-1].strip('"\'').replace('**', '') if lines else ""
+
+            if content and len(content) > 5:
+                print(f"  ✅ Переформулировка: '{query}' → '{content}'")
+                return content
+        print("  ⚠️ LLM вернул пустой ответ, используется оригинальный запрос")
+    except Exception as e:
+        print(f"\n  ⚠️ Ошибка LLM: {e}")
+        print("  ⚠️ Переформулировка запроса через LLM недоступна.")
+        print("  ⚠️ Поиск продолжается без переформулировки.\n")
+    return query
+
+
+def split_query_terms(query):
+    """Разбить запрос на значимые термы."""
+    q = query.lower()
+    terms = [w for w in q.split() if len(w) > 2 and w not in STOP_WORDS]
+    return terms, q
+
+
+def show_text_safe(text, max_len=600):
+    """Обрезать текст на границе предложения, пометить обрыв."""
+    if len(text) <= max_len:
+        return text
+    cut = text[:max_len]
+    last_period = max(cut.rfind('. '), cut.rfind('.\n'), cut.rfind('! '), cut.rfind('? '))
+    if last_period > max_len * 0.3:
+        return cut[:last_period + 1] + "\n[...]"
+    return cut.rsplit(' ', 1)[0] + "\n[...]"
+
+
+def fix_chunk_start(text):
+    """
+    Если чанк начинается с середины предложения (первая буква строчная),
+    найти первый обрыв предложения в начале и отрезать его.
+    """
+    t = text.strip()
+    if not t:
+        return text, False
+
+    # Первая буква строчная → обрыв
+    if t[0].islower():
+        # Попытаться найти начало первого полного предложения
+        for sep in ['. ', '.\n', '? ', '! ', '\n\n']:
+            idx = t.find(sep)
+            if 20 < idx < 400:
+                return t[idx + len(sep):], True
+        return text, True  # не нашли границу — просто помечаем
+
+    return text, False
+
+
+def search_multi_vector(hipporag, query, top_k=10, candidate_pool=200):
+    """
+    Multi-vector поиск:
+    1. Переформулировка запроса через LLM
+    2. Полный запрос → эмбеддинг + similarity
+    3. Каждый терм запроса → эмбеддинг + similarity (max-pooling)
+    4. Большой keyword boost (1.0)
+    5. Комбинированный скор
+    """
+    # Шаг 0: Переформулировка
+    search_query = reformulate_query(hipporag, query)
+
+    chunk_store = hipporag.chunk_embedding_store
+    if len(chunk_store.embeddings) == 0:
+        print("No chunk embeddings found.")
+        return []
+
+    all_emb = np.array(chunk_store.embeddings)
+    n_chunks = len(all_emb)
+
+    # Шаг 1: эмбеддинг полного запроса
+    full_emb = hipporag.embedding_model.encode([search_query])
+    full_scores = np.dot(all_emb, full_emb.T).squeeze()
+
+    # Шаг 2: эмбеддинг каждого терма
+    terms, q_lower = split_query_terms(search_query)
+    if not terms:
+        terms = [w for w in search_query.lower().split() if len(w) > 2]
+
+    multi_scores = np.zeros(n_chunks)
+    if terms:
+        term_embs = hipporag.embedding_model.encode(terms)
+        for te in term_embs:
+            ts = np.dot(all_emb, te.reshape(-1, 1)).squeeze()
+            multi_scores = np.maximum(multi_scores, ts)  # max-pooling
+
+    # Шаг 3: сортировка по full_scores для candidate pool
+    sorted_idx = np.argsort(full_scores)[::-1]
+    pool = min(candidate_pool, n_chunks)
+
+    scored = []
+    for i in range(pool):
+        idx = sorted_idx[i]
+        text = chunk_store.texts[idx]
+        tl = text.lower()
+
+        dpr = float(full_scores[idx])
+        multi = float(multi_scores[idx]) if terms else 0.0
+
+        # Keyword boost
+        boost = 0.0
+        if q_lower in tl:
+            boost += 1.0
+        if terms:
+            matches = sum(1 for t in terms if t in tl)
+            boost += 0.3 * min(matches, 5) / max(len(terms), 1)
+
+        # Комбинируем: full-query (40%) + multi-vector (60%) + keyword boost
+        combo = dpr * 0.4 + multi * 0.6
+        final = combo * (1.0 + boost)
+        scored.append((text, final, dpr, multi, boost))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return scored[:top_k], search_query
+
+
+def search_hipporag_graph(hipporag, query, top_k=10, linking_entities=30, passage_weight=0.3):
+    """Графовый поиск: entity linking + PPR на графе."""
+    hipporag.prepare_retrieval_objects()
+
+    # Определяем знак зодиака для точного entity linking
+    _, q_lower = split_query_terms(query)
+    terms, _ = split_query_terms(query)
+
+    q_emb = hipporag.embedding_model.encode([query])
+    entity_scores = np.dot(hipporag.entity_embeddings, q_emb.T).squeeze()
+
+    # Sign dominance boost для entity scoring
+    sign_in_query = _sign_in_query(q_lower)
+    if sign_in_query:
+        for i, e_text in enumerate(hipporag.entity_embedding_store.texts):
+            if sign_in_query in str(e_text).lower():
+                entity_scores[i] *= 1.5
+
+    node_weights = np.zeros(hipporag.graph.vcount())
+    sorted_entity_idx = np.argsort(entity_scores)[::-1][:linking_entities]
+    for e_idx in sorted_entity_idx:
+        vid = hipporag.entity_node_idxs[e_idx]
+        node_weights[vid] = entity_scores[e_idx]
+
+    dpr_ids, dpr_scores = hipporag.dense_passage_retrieval(query)
+    norm_dpr = min_max_normalize(dpr_scores)
+    for i, pid in enumerate(dpr_ids):
+        pkey = hipporag.passage_node_keys[pid]
+        if pkey in hipporag.node_name_to_vertex_idx:
+            vid = hipporag.node_name_to_vertex_idx[pkey]
+            node_weights[vid] += norm_dpr[i] * passage_weight
+
+    if sum(node_weights) == 0:
+        ppr_ids, ppr_scores = dpr_ids, dpr_scores
+    else:
+        ppr_ids, ppr_scores = hipporag.run_ppr(node_weights, damping=0.3)
+
+    chunk_store = hipporag.chunk_embedding_store
+    scored = []
+    for i in range(min(len(ppr_ids), len(dpr_ids))):
+        idx = ppr_ids[i]
+        text = chunk_store.texts[idx]
+        ppr_score = float(ppr_scores[i])
+        dpr_idx = np.where(dpr_ids == idx)[0]
+        dpr_score = float(dpr_scores[dpr_idx[0]]) if len(dpr_idx) > 0 else 0.0
+        tl = text.lower()
+        boost = _keyword_boost(tl, q_lower, terms)
+        sign_score = _chunk_sign_score(chunk_store, idx, q_lower)
+        boost += sign_score
+        final_score = ppr_score * (1.0 + boost)
+        scored.append((text, final_score, ppr_score, dpr_score, boost))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return scored[:top_k]
+
+
+def _tokenize(text):
+    return re.findall(r'[а-яёa-z0-9]+', text.lower())
+
+
+def _build_bm25(chunk_store):
+    if not hasattr(_build_bm25, "cache"):
+        corpus = [_tokenize(t) for t in chunk_store.texts]
+        _build_bm25.cache = BM25Okapi(corpus)
+    return _build_bm25.cache
+
+
+_CROSS_ENCODER = None
+_CROSS_ENCODER_RU = None
+
+
+def _get_crossencoder():
+    global _CROSS_ENCODER
+    if _CROSS_ENCODER is None:
+        from sentence_transformers import CrossEncoder
+        _CROSS_ENCODER = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+    return _CROSS_ENCODER
+
+
+def _get_crossencoder_ru():
+    global _CROSS_ENCODER_RU
+    if _CROSS_ENCODER_RU is None:
+        from sentence_transformers import CrossEncoder
+        _CROSS_ENCODER_RU = CrossEncoder('DiTy/cross-encoder-russian-msmarco')
+    return _CROSS_ENCODER_RU
+
+
+def _rerank_with_crossencoder_ru(query, candidates):
+    if not candidates:
+        return candidates
+    try:
+        ce = _get_crossencoder_ru()
+        pairs = [(query, c[0][:512]) for c in candidates]
+        xc_scores = ce.predict(pairs, show_progress_bar=False)
+        reranked = []
+        for i, c in enumerate(candidates):
+            xc = float(xc_scores[i])
+            text = c[0]
+            old = c[1]
+            boost = c[4] if len(c) > 4 else 0.0
+            final = xc * 0.7 + old * 0.3 * (1.0 + boost)
+            reranked.append((text, final, xc, old, boost))
+        reranked.sort(key=lambda x: x[1], reverse=True)
+        return reranked
+    except Exception as e:
+        print(f"  \u26a0\ufe0f Русский Cross-encoder недоступен ({e})")
+        return candidates
+
+
+def _rerank_with_crossencoder(query, candidates):
+    if not candidates:
+        return candidates
+    try:
+        ce = _get_crossencoder()
+        pairs = [(query, c[0][:512]) for c in candidates]
+        xc_scores = ce.predict(pairs, show_progress_bar=False)
+        reranked = []
+        for i, c in enumerate(candidates):
+            xc = float(xc_scores[i])
+            text = c[0]
+            old = c[1]
+            boost = c[4] if len(c) > 4 else 0.0
+            final = xc * 0.7 + old * 0.3 * (1.0 + boost)
+            reranked.append((text, final, xc, old, boost))
+        reranked.sort(key=lambda x: x[1], reverse=True)
+        return reranked
+    except Exception as e:
+        print(f"  \u26a0\ufe0f Cross-encoder недоступен ({e}), используется исходный порядок")
+        return candidates
+
+
+_E5_MODEL = None
+
+
+def search_mxbai(hipporag, query, top_k=10, candidate_pool=200):
+    """
+    Поиск через BM25 + существующие эмбеддинги (RRF) + sign dominance.
+    mxbai-embed и mxbai-rerank — английские модели, не работают для русского домена.
+    Метод использует проверенную RRF-комбинацию (как метод 13).
+    """
+    chunk_store = hipporag.chunk_embedding_store
+    if len(chunk_store.embeddings) == 0:
+        return []
+    n_chunks = len(chunk_store.texts)
+    bm25 = _build_bm25(chunk_store)
+    terms, q_lower = split_query_terms(query)
+    if not terms:
+        terms = [w for w in query.lower().split() if len(w) > 2]
+    expanded_terms = _expand_query(q_lower, terms)
+    q_tokens = list(set(_tokenize(query) + expanded_terms))
+    bm25_scores = bm25.get_scores(q_tokens)
+
+    q_emb = hipporag.embedding_model.encode([query])
+    all_emb = np.array(chunk_store.embeddings)
+    emb_scores = np.dot(all_emb, q_emb.T).squeeze()
+
+    # RRF
+    bm25_rank = np.argsort(bm25_scores)[::-1]
+    emb_rank = np.argsort(emb_scores)[::-1]
+    bm25_pos = {idx: pos for pos, idx in enumerate(bm25_rank)}
+    emb_pos = {idx: pos for pos, idx in enumerate(emb_rank)}
+    k = 60
+    rrf_scores = [1/(k + bm25_pos.get(i, 1e6)) + 1/(k + emb_pos.get(i, 1e6)) for i in range(n_chunks)]
+    candidate_idx = np.argsort(rrf_scores)[::-1][:candidate_pool]
+    if len(candidate_idx) == 0:
+        return []
+
+    print(f"  ✅ RRF (BM25 + эмбеддинги) + sign dominance + контекст", flush=True)
+
+    scored = []
+    for idx in candidate_idx:
+        text = chunk_store.texts[idx]
+        tl = text.lower()
+        boost = _keyword_boost(tl, q_lower, terms)
+        sign_score = _chunk_sign_score(chunk_store, idx, q_lower)
+        boost += sign_score
+        emb = float(emb_scores[idx])
+        rrf = float(rrf_scores[idx])
+        final = emb * 0.6 + rrf * 0.4 * (1.0 + boost)
+        scored.append((idx, final, emb, rrf, boost))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+
+    # Контекстное окно ±1
+    used_ranges = set()
+    merged = []
+    for idx, final, emb_sim, rrf, boost in scored:
+        source, page = _get_chunk_meta(chunk_store, idx)
+        if not source:
+            continue
+        window = set([idx])
+        for offset in range(-1, 2):
+            ni = idx + offset
+            if ni < 0 or ni >= n_chunks:
+                continue
+            ns, np_ = _get_chunk_meta(chunk_store, ni)
+            if ns == source and abs(np_ - page) <= 1:
+                window.add(ni)
+        pages = set()
+        for wi in window:
+            _, wp = _get_chunk_meta(chunk_store, wi)
+            pages.add(wp)
+        min_p, max_p = min(pages), max(pages)
+        rkey = f"{source}:{min_p}-{max_p}"
+        if rkey in used_ranges:
+            continue
+        used_ranges.add(rkey)
+        parts = [chunk_store.texts[wi] for wi in sorted(window)]
+        full_text = "\n\n".join(parts)
+        boost_final = _keyword_boost(full_text.lower(), q_lower, terms)
+        final_score = emb_sim * (1.0 + boost_final)
+        merged.append((full_text, final_score, source, min_p, max_p, boost_final))
+        if len(merged) >= top_k:
+            break
+
+    merged.sort(key=lambda x: x[1], reverse=True)
+    return merged[:top_k]
+
+
+def _get_e5():
+    global _E5_MODEL
+    if _E5_MODEL is None:
+        from sentence_transformers import SentenceTransformer
+        print("  ⏳ Загрузка E5 модели...", flush=True)
+        _E5_MODEL = SentenceTransformer('intfloat/multilingual-e5-small')
+        print("  ✅ E5 модель загружена", flush=True)
+    return _E5_MODEL
+
+
+def search_e5_rerank(hipporag, query, top_k=10, candidate_pool=200):
+    """
+    Поиск: существующие эмбеддинги (1369 чанков) → E5 sentence-rerank top 50.
+    E5 эмбеддит только query + предложения топ-50 кандидатов (не все чанки).
+    Качество не падает — BM25 + существующие эмбеддинги отбирают лучших кандидатов,
+    E5 только доуточняет ранжирование по предложениям.
+    """
+    import re as _re
+
+    chunk_store = hipporag.chunk_embedding_store
+    if len(chunk_store.embeddings) == 0:
+        return []
+    n_chunks = len(chunk_store.texts)
+    bm25 = _build_bm25(chunk_store)
+    terms, q_lower = split_query_terms(query)
+    if not terms:
+        terms = [w for w in query.lower().split() if len(w) > 2]
+    expanded_terms = _expand_query(q_lower, terms)
+    q_tokens = list(set(_tokenize(query) + expanded_terms))
+    bm25_scores = bm25.get_scores(q_tokens)
+
+    # Кандидаты: комбинация BM25 + существующие эмбеддинги (все 1369 чанков)
+    q_emb = hipporag.embedding_model.encode([query])
+    all_emb = np.array(chunk_store.embeddings)
+    emb_scores = np.dot(all_emb, q_emb.T).squeeze()
+    bm25_rank = np.argsort(bm25_scores)[::-1]
+    emb_rank = np.argsort(emb_scores)[::-1]
+    bm25_pos = {idx: pos for pos, idx in enumerate(bm25_rank)}
+    emb_pos = {idx: pos for pos, idx in enumerate(emb_rank)}
+    k = 60
+    rrf_scores = [1/(k + bm25_pos.get(i, 1e6)) + 1/(k + emb_pos.get(i, 1e6)) for i in range(n_chunks)]
+    candidate_idx = np.argsort(rrf_scores)[::-1][:candidate_pool]
+
+    if len(candidate_idx) == 0:
+        return []
+
+    # E5: только для sentence-reranking топ-50
+    e5 = _get_e5()
+    q_sentences = [s.strip() for s in _re.split(r'[.!?]+', query) if len(s.strip()) > 3]
+    if not q_sentences:
+        q_sentences = [query]
+    q_sent_embs = e5.encode([f"query: {s}" for s in q_sentences])
+
+    top50 = candidate_idx[:50]
+    rest = candidate_idx[50:]
+
+    scored = []
+    for idx in top50:
+        text = chunk_store.texts[idx]
+        tl = text.lower()
+
+        # Sentence-level через E5
+        chunk_sents = [s.strip() for s in _re.split(r'[.!?]+', text) if len(s.strip()) > 10]
+        sent_score = 0
+        if chunk_sents:
+            chunk_sents = chunk_sents[:10]
+            cs_embs = e5.encode([f"passage: {s}" for s in chunk_sents])
+            sim = np.dot(cs_embs, q_sent_embs.T)
+            sent_score = float(np.max(sim))
+
+        boost = _keyword_boost(tl, q_lower, terms)
+        sign_score = _chunk_sign_score(chunk_store, idx, q_lower)
+        boost += sign_score
+
+        final = float(emb_scores[idx]) * 0.4 + sent_score * 0.4 + float(emb_scores[idx]) * 0.2 * max(boost, 0)
+        scored.append((idx, final, float(emb_scores[idx]), sent_score, boost))
+
+    for idx in rest:
+        text = chunk_store.texts[idx]
+        tl = text.lower()
+        boost = _keyword_boost(tl, q_lower, terms)
+        sign_score = _chunk_sign_score(chunk_store, idx, q_lower)
+        boost += sign_score
+        final = float(emb_scores[idx]) * (1.0 + boost)
+        scored.append((idx, final, float(emb_scores[idx]), 0, boost))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+
+    # Контекстное окно ±1
+    used_ranges = set()
+    merged = []
+    for idx, final, emb_sim, sent_score, boost in scored:
+        source, page = _get_chunk_meta(chunk_store, idx)
+        if not source:
+            continue
+        window = set([idx])
+        for offset in range(-1, 2):
+            ni = idx + offset
+            if ni < 0 or ni >= n_chunks:
+                continue
+            ns, np_ = _get_chunk_meta(chunk_store, ni)
+            if ns == source and abs(np_ - page) <= 1:
+                window.add(ni)
+        pages = set()
+        for wi in window:
+            _, wp = _get_chunk_meta(chunk_store, wi)
+            pages.add(wp)
+        min_p, max_p = min(pages), max(pages)
+        rkey = f"{source}:{min_p}-{max_p}"
+        if rkey in used_ranges:
+            continue
+        used_ranges.add(rkey)
+        parts = [chunk_store.texts[wi] for wi in sorted(window)]
+        full_text = "\n\n".join(parts)
+        boost_final = _keyword_boost(full_text.lower(), q_lower, terms)
+        final_score = emb_sim * (1.0 + boost_final) + sent_score * 0.3
+        merged.append((full_text, final_score, source, min_p, max_p, boost_final))
+        if len(merged) >= top_k:
+            break
+
+    merged.sort(key=lambda x: x[1], reverse=True)
+    return merged[:top_k]
+
+
+def _get_chunk_meta(chunk_store, idx):
+    try:
+        row = chunk_store.get_row(chunk_store.hash_ids[idx])
+        m = row.get("metadata", {}) if isinstance(row, dict) else {}
+        if isinstance(m, str):
+            m = json.loads(m)
+        return str(m.get("source_file", "")), int(m.get("page_num", 0))
+    except Exception:
+        return "", 0
+
+
+def search_bm25_hybrid(hipporag, query, top_k=10, candidate_pool=200):
+    chunk_store = hipporag.chunk_embedding_store
+    if len(chunk_store.embeddings) == 0:
+        return []
+    n_chunks = len(chunk_store.texts)
+    bm25 = _build_bm25(chunk_store)
+    terms, q_lower = split_query_terms(query)
+    if not terms:
+        terms = [w for w in query.lower().split() if len(w) > 2]
+    q_emb = hipporag.embedding_model.encode([query])
+    all_emb = np.array(chunk_store.embeddings)
+    emb_scores = np.dot(all_emb, q_emb.T).squeeze()
+    q_tokens = _tokenize(query)
+    bm25_scores = bm25.get_scores(q_tokens)
+    candidate_idx = np.argsort(bm25_scores)[::-1][:candidate_pool]
+    scored = []
+    for idx in candidate_idx:
+        if idx >= n_chunks:
+            continue
+        text = chunk_store.texts[idx]
+        tl = text.lower()
+        emb = float(emb_scores[idx])
+        boost = _keyword_boost(tl, q_lower, terms)
+        final = emb * (1.0 + boost)
+        scored.append((text, final, emb, float(bm25_scores[idx]), boost))
+    scored.sort(key=lambda x: x[1], reverse=True)
+    top_50 = scored[:50]
+    rest = scored[50:]
+    reranked = _rerank_with_crossencoder(query, top_50)
+    return (reranked + rest)[:top_k]
+
+
+def search_bm25_hybrid_ru(hipporag, query, top_k=10, candidate_pool=200):
+    """BM25 + RU-CE + Query expansion (оригинальная версия)."""
+    chunk_store = hipporag.chunk_embedding_store
+    if len(chunk_store.embeddings) == 0:
+        return []
+    n_chunks = len(chunk_store.texts)
+    bm25 = _build_bm25(chunk_store)
+    terms, q_lower = split_query_terms(query)
+    if not terms:
+        terms = [w for w in query.lower().split() if len(w) > 2]
+    q_emb = hipporag.embedding_model.encode([query])
+    all_emb = np.array(chunk_store.embeddings)
+    emb_scores = np.dot(all_emb, q_emb.T).squeeze()
+    expanded_terms = _expand_query(q_lower, terms)
+    q_tokens = list(set(_tokenize(query) + expanded_terms))
+    bm25_scores = bm25.get_scores(q_tokens)
+    candidate_idx = np.argsort(bm25_scores)[::-1][:candidate_pool]
+    scored = []
+    for idx in candidate_idx:
+        if idx >= n_chunks:
+            continue
+        text = chunk_store.texts[idx]
+        tl = text.lower()
+        emb = float(emb_scores[idx])
+        boost = _keyword_boost(tl, q_lower, terms)
+        final = emb * (1.0 + boost)
+        scored.append((text, final, emb, float(bm25_scores[idx]), boost))
+    scored.sort(key=lambda x: x[1], reverse=True)
+    top_50 = scored[:50]
+    rest = scored[50:]
+    reranked = _rerank_with_crossencoder_ru(query, top_50)
+    return (reranked + rest)[:top_k]
+
+
+def search_rrf_context(hipporag, query, top_k=10, candidate_pool=150, context_window=1):
+    """
+    Гибрид RRF (BM25 + Embedding) + контекстное окно + RU-CE.
+    """
+    chunk_store = hipporag.chunk_embedding_store
+    if len(chunk_store.embeddings) == 0:
+        return []
+    n_chunks = len(chunk_store.texts)
+    bm25 = _build_bm25(chunk_store)
+    terms, q_lower = split_query_terms(query)
+    if not terms:
+        terms = [w for w in query.lower().split() if len(w) > 2]
+
+    q_emb = hipporag.embedding_model.encode([query])
+    all_emb = np.array(chunk_store.embeddings)
+    emb_raw = np.dot(all_emb, q_emb.T).squeeze()
+
+    expanded_terms = _expand_query(q_lower, terms)
+    q_tokens = list(set(_tokenize(query) + expanded_terms))
+    bm25_raw = bm25.get_scores(q_tokens)
+
+    # Только top-candidates от BM25
+    candidate_idx = set(np.argsort(bm25_raw)[::-1][:candidate_pool])
+
+    # RRF среди кандидатов + sign dominance + keyword boost
+    bm25_rank = {idx: pos for pos, idx in enumerate(np.argsort(bm25_raw)[::-1])}
+    emb_rank = {idx: pos for pos, idx in enumerate(np.argsort(emb_raw)[::-1])}
+    k = 60
+
+    scored = []
+    for idx in candidate_idx:
+        rrf = 1/(k + bm25_rank.get(idx, 1e6)) + 1/(k + emb_rank.get(idx, 1e6))
+        tl = chunk_store.texts[idx].lower()
+        boost = _keyword_boost(tl, q_lower, terms)
+        sign_score = _chunk_sign_score(chunk_store, idx, q_lower)
+        boost += sign_score
+        scored.append((idx, rrf, float(emb_raw[idx]), float(bm25_raw[idx]), boost))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+
+    # CE rerank top 30
+    top_30 = [(chunk_store.texts[idx], s, e, b, boost) for idx, s, e, b, boost in scored[:30]]
+    try:
+        reranked = _rerank_with_crossencoder_ru(query, top_30)
+        text_to_idx = {chunk_store.texts[i]: i for i in range(n_chunks)}
+        reranked_idx = [text_to_idx[r[0]] for r in reranked if r[0] in text_to_idx]
+    except Exception:
+        reranked_idx = [scored[i][0] for i in range(min(30, len(scored)))]
+    reranked_idx.extend([scored[i][0] for i in range(min(30, len(scored)), len(scored))])
+
+    # Контекстное окно (только ±1 страница)
+    used_ranges = set()
+    merged = []
+    for idx in reranked_idx:
+        source, page = _get_chunk_meta(chunk_store, idx)
+        if not source:
+            continue
+        window = set([idx])
+        for offset in range(-context_window, context_window + 1):
+            ni = idx + offset
+            if ni < 0 or ni >= n_chunks:
+                continue
+            ns, np_ = _get_chunk_meta(chunk_store, ni)
+            if ns == source and abs(np_ - page) <= context_window:
+                window.add(ni)
+        pages = set()
+        for wi in window:
+            _, wp = _get_chunk_meta(chunk_store, wi)
+            pages.add(wp)
+        min_p, max_p = min(pages), max(pages)
+        rkey = f"{source}:{min_p}-{max_p}"
+        if rkey in used_ranges:
+            continue
+        used_ranges.add(rkey)
+        parts = [chunk_store.texts[wi] for wi in sorted(window)]
+        full_text = "\n\n".join(parts)
+        tl_full = full_text.lower()
+        boost = _keyword_boost(tl_full, q_lower, terms)
+        sign_score = _chunk_sign_score(chunk_store, idx, q_lower)
+        boost += sign_score
+        final = float(emb_raw[idx]) * (1.0 + boost)
+        merged.append((full_text, final, source, min_p, max_p, boost))
+        if len(merged) >= top_k:
+            break
+
+    merged.sort(key=lambda x: x[1], reverse=True)
+    return merged[:top_k]
+
+
+_SIGN_DOMINANCE = None  # chunk_idx → dominant_zodiac_sign
+
+
+def _build_sign_index(chunk_store):
+    """Предвычисляем, какой знак зодиака доминирует в каждом чанке."""
+    global _SIGN_DOMINANCE
+    if _SIGN_DOMINANCE is not None:
+        return _SIGN_DOMINANCE
+    _SIGN_DOMINANCE = {}
+    for idx, text in enumerate(chunk_store.texts):
+        tl = text.lower()
+        counts = {}
+        for sign in ZODIAC_SIGNS:
+            c = tl.count(sign)
+            if c > 0:
+                counts[sign] = c
+        if counts:
+            dominant = max(counts, key=counts.get)
+            _SIGN_DOMINANCE[idx] = dominant
+    return _SIGN_DOMINANCE
+
+
+def _sign_in_query(q_lower):
+    """Найти знак зодиака в запросе (любой падеж) → именительный падеж."""
+    for form, nominative in FORM_TO_SIGN.items():
+        if form in q_lower:
+            return nominative
+    # Fallback: прямой поиск
+    for s in ZODIAC_SIGNS:
+        if s in q_lower:
+            return s
+    return None
+
+
+def _count_sign(tl, sign):
+    """Сколько раз знак зодиака упомянут в тексте (все падежи)."""
+    total = 0
+    for form in ZODIAC_FORMS.get(sign, [sign]):
+        total += tl.count(form)
+    return total
+
+
+def _keyword_boost(tl, q_lower, terms):
+    boost = 0.0
+    if q_lower in tl:
+        boost += 1.0
+    matches = sum(1 for t in terms if t in tl)
+    if terms:
+        boost += 0.3 * min(matches, 5) / max(len(terms), 1)
+    if matches >= max(2, len(terms) - 1):
+        boost += 2.0
+    for t in terms:
+        if len(t) <= 2:
+            continue
+        if tl.count(t) >= 3:
+            boost += 1.5
+        if t in tl[:200]:
+            boost += 0.5
+    # Co-occurrence boost: если все термы запроса встречаются в радиусе 300 символов
+    if len(terms) >= 2:
+        for i, t1 in enumerate(terms):
+            for t2 in terms[i+1:]:
+                if t1 in tl and t2 in tl:
+                    pos1 = tl.find(t1)
+                    pos2 = tl.find(t2)
+                    if abs(pos1 - pos2) < 300:
+                        boost += 2.0  # сильный буст когда термы рядом
+    # Определяем знак зодиака в запросе (любой падеж)
+    sign_in_query = _sign_in_query(q_lower)
+    if sign_in_query and _count_sign(tl, sign_in_query) >= 2:
+        boost += 1.5
+    return boost
+
+
+def _chunk_sign_score(chunk_store, idx, q_lower):
+    """Возвращает скор доминирования знака зодиака для чанка."""
+    sign_in_query = _sign_in_query(q_lower)
+    if not sign_in_query:
+        return 0.0
+    tl = chunk_store.texts[idx].lower()
+    sign_count = _count_sign(tl, sign_in_query)
+    if sign_count == 0:
+        return -3.0  # штраф: знак вообще не упомянут
+    # Считаем все знаки (все падежи)
+    total = sum(_count_sign(tl, s) for s in ZODIAC_SIGNS)
+    if total == 0:
+        return 0.0
+    ratio = sign_count / total
+    if ratio >= 0.5:
+        return 4.0  # знак доминирует (>50% всех упоминаний)
+    elif ratio >= 0.2:
+        return 2.0  # знак заметно присутствует
+    return 0.5
+
+
+def search_small_to_big(hipporag, query, top_k=10, candidate_pool=100, context_window=2):
+    chunk_store = hipporag.chunk_embedding_store
+    if len(chunk_store.embeddings) == 0:
+        return []
+    n_chunks = len(chunk_store.texts)
+    bm25 = _build_bm25(chunk_store)
+    terms, q_lower = split_query_terms(query)
+    if not terms:
+        terms = [w for w in query.lower().split() if len(w) > 2]
+    q_emb = hipporag.embedding_model.encode([query])
+    all_emb = np.array(chunk_store.embeddings)
+    emb_scores = np.dot(all_emb, q_emb.T).squeeze()
+    q_tokens = _tokenize(query)
+    bm25_scores = bm25.get_scores(q_tokens)
+    candidate_idx = np.argsort(bm25_scores)[::-1][:candidate_pool]
+    scored = []
+    for idx in candidate_idx:
+        if idx >= n_chunks:
+            continue
+        text = chunk_store.texts[idx]
+        tl = text.lower()
+        emb = float(emb_scores[idx])
+        boost = _keyword_boost(tl, q_lower, terms)
+        sign_score = _chunk_sign_score(chunk_store, idx, q_lower)
+        boost += sign_score
+        final = emb * (1.0 + boost)
+        scored.append((idx, final, emb, float(bm25_scores[idx]), boost))
+    scored.sort(key=lambda x: x[1], reverse=True)
+
+    # Cross-encoder rerank top 50
+    try:
+        ce = _get_crossencoder()
+        top_50 = scored[:50]
+        pairs = [(query, chunk_store.texts[idx][:512]) for idx, *_ in top_50]
+        xc_scores = ce.predict(pairs, show_progress_bar=False)
+        for i, (idx, final, emb, bm25_s, boost) in enumerate(top_50):
+            xc = float(xc_scores[i])
+            final = emb * 0.8 * (1.0 + boost) + xc * 0.2
+            scored[i] = (idx, final, emb, bm25_s, boost, xc)
+    except Exception:
+        pass
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    used_ranges = set()
+    merged = []
+    context_window = 1
+
+    for idx, final, emb, bm25_s, boost, *_ in scored:
+        source, page = _get_chunk_meta(chunk_store, idx)
+        if not source:
+            continue
+        window = set([idx])
+        for offset in range(-context_window * 2, context_window * 2 + 1):
+            ni = idx + offset
+            if ni < 0 or ni >= n_chunks:
+                continue
+            ns, np_ = _get_chunk_meta(chunk_store, ni)
+            if ns == source and abs(np_ - page) <= context_window:
+                window.add(ni)
+        pages = set()
+        for wi in window:
+            _, wp = _get_chunk_meta(chunk_store, wi)
+            pages.add(wp)
+        min_p, max_p = min(pages), max(pages)
+        rkey = f"{source}:{min_p}-{max_p}"
+        if rkey in used_ranges:
+            continue
+        used_ranges.add(rkey)
+        parts = [chunk_store.texts[wi] for wi in sorted(window)]
+        full_text = "\n\n".join(parts)
+        boost_final = _keyword_boost(full_text.lower(), q_lower, terms)
+        final_score = final * (1.0 + boost_final * 0.5)
+        merged.append((full_text, final_score, source, min_p, max_p, boost_final))
+        if len(merged) >= top_k:
+            break
+
+    # Обрезаем начало до заголовка нужного знака зодиака
+    sign_in_result = _sign_in_query(q_lower)
+    if sign_in_result:
+        import re as _re
+        trimmed = []
+        for text, score, source, min_p, max_p, boost in merged:
+            for form in ZODIAC_FORMS.get(sign_in_result, [sign_in_result]):
+                pattern = rf'(?:^|[.!\n])\s*{_re.escape(form.upper())}(?:\s|[:,.!])'
+                m = _re.search(pattern, text, _re.IGNORECASE)
+                if m:
+                    cut_pos = m.start()
+                    if cut_pos > 0:
+                        text = text[cut_pos:]
+                    text = text.lstrip(' .\n\t,;:!?')
+                    break
+            trimmed.append((text, score, source, min_p, max_p, boost))
+        merged = trimmed
+
+    # Дедупликация: убираем дубликаты по содержимому
+    seen_texts = set()
+    deduped = []
+    for text, score, source, min_p, max_p, boost in merged:
+        # Сравниваем по первым 200 символам
+        key = text[:200].lower()
+        if key in seen_texts:
+            continue
+        seen_texts.add(key)
+        deduped.append((text, score, source, min_p, max_p, boost))
+    merged = deduped
+
+    merged.sort(key=lambda x: x[1], reverse=True)
+    return merged[:top_k]
+
+
+_COLBERT = None
+_COLBERT_LINEAR = None
+_COLBERT_BERT = None
+
+
+def _get_colbert():
+    """Загрузить ColBERT-v2 (лениво): BERT + linear projection (128-dim)."""
+    global _COLBERT, _COLBERT_LINEAR, _COLBERT_BERT
+    if _COLBERT is None:
+        from sentence_transformers import SentenceTransformer
+        from safetensors.torch import load_file
+        import os as _os
+        print("  ⏳ Загрузка ColBERT-v2...", flush=True)
+        st = SentenceTransformer('colbert-ir/colbertv2.0')
+        _COLBERT_BERT = st[0].auto_model
+        _COLBERT_BERT.eval()
+        hub = _os.path.expanduser('~/.cache/huggingface/hub/models--colbert-ir--colbertv2.0/snapshots')
+        if _os.path.exists(hub):
+            snaps = _os.listdir(hub)
+            if snaps:
+                safetensors = load_file(_os.path.join(hub, snaps[0], 'model.safetensors'))
+                _COLBERT_LINEAR = safetensors['linear.weight']  # (128, 768)
+        _COLBERT = st
+        print("  ✅ ColBERT-v2 загружен", flush=True)
+    return _COLBERT
+
+
+def _colbert_encode(text, max_length=512):
+    """Encode text with ColBERT → 128-dim token embeddings + mask."""
+    import torch
+    import torch.nn.functional as F
+    tokens = _COLBERT.tokenize([text])
+    for k, v in tokens.items():
+        if isinstance(v, torch.Tensor) and v.shape[1] > max_length:
+            tokens[k] = v[:, :max_length]
+    with torch.no_grad():
+        out = _COLBERT_BERT(**tokens)
+        emb = out.last_hidden_state
+        if _COLBERT_LINEAR is not None:
+            emb = torch.matmul(emb, _COLBERT_LINEAR.T.to(emb.device))
+        emb = F.normalize(emb, dim=-1)
+    return emb, tokens['attention_mask']
+
+
+def _colbert_score(q_emb, q_mask, d_emb, d_mask):
+    """MaxSim late interaction score."""
+    import torch
+    sim = torch.matmul(q_emb, d_emb.transpose(1, 2))
+    qm = q_mask.unsqueeze(-1).float()
+    dm = d_mask.unsqueeze(1).float()
+    sim = sim * qm * dm
+    max_sim = sim.max(dim=-1).values
+    score = (max_sim * qm.squeeze(-1)).sum(dim=-1)
+    score = score / qm.squeeze(-1).sum(dim=-1).clamp(min=1)
+    return score.item()
+
+
+def search_colbert(hipporag, query, top_k=10, candidate_pool=200):
+    """
+    Поиск: RRF (BM25 + эмбеддинги) → ColBERT-v2 late interaction reranking.
+    Токен-уровневый поиск: каждый токен запроса сравнивается с каждым токеном чанка.
+    Медленнее, но точнее для сложных cross-chunk запросов.
+    """
+    import time as _time
+    chunk_store = hipporag.chunk_embedding_store
+    if len(chunk_store.embeddings) == 0:
+        return []
+    n_chunks = len(chunk_store.texts)
+    bm25 = _build_bm25(chunk_store)
+    terms, q_lower = split_query_terms(query)
+    if not terms:
+        terms = [w for w in query.lower().split() if len(w) > 2]
+    exp = _expand_query(q_lower, terms)
+    q_tokens = list(set(_tokenize(query) + exp))
+    bm25_scores = bm25.get_scores(q_tokens)
+
+    q_emb = hipporag.embedding_model.encode([query])
+    all_emb = np.array(chunk_store.embeddings)
+    emb_scores = np.dot(all_emb, q_emb.T).squeeze()
+
+    bm25_r = np.argsort(bm25_scores)[::-1]
+    emb_r = np.argsort(emb_scores)[::-1]
+    bm25_p = {idx: p for p, idx in enumerate(bm25_r)}
+    emb_p = {idx: p for p, idx in enumerate(emb_r)}
+    k = 60
+    rrf = [1/(k + bm25_p.get(i, 1e6)) + 1/(k + emb_p.get(i, 1e6)) for i in range(n_chunks)]
+    candidates = np.argsort(rrf)[::-1][:candidate_pool]
+    if len(candidates) == 0:
+        return []
+
+    _get_colbert()
+    print("  🧠 ColBERT late interaction (30 candidates)...", flush=True)
+    t0 = _time.time()
+    q_ce, q_cm = _colbert_encode(query)
+
+    top30 = candidates[:30]
+    rest = candidates[30:]
+
+    scored = []
+    for pos, idx in enumerate(top30):
+        t1 = _time.time()
+        d_ce, d_cm = _colbert_encode(chunk_store.texts[idx][:512])
+        col_score = _colbert_score(q_ce, q_cm, d_ce, d_cm)
+        dt = _time.time() - t1
+        tl = chunk_store.texts[idx].lower()
+        boost = _keyword_boost(tl, q_lower, terms)
+        sign_score = _chunk_sign_score(chunk_store, idx, q_lower)
+        boost += sign_score
+        # ColBERT (70%) + embedding (30%), boost применяется к ColBERT
+        final = col_score * 0.7 * (1.0 + boost * 0.5) + float(emb_scores[idx]) * 0.3
+        scored.append((idx, final, float(emb_scores[idx]), col_score, boost))
+        if pos < 3 or pos == len(top30) - 1:
+            print(f"     [{pos+1}/30] score={col_score:.4f} ({dt:.1f}s)", flush=True)
+
+    for idx in rest:
+        tl = chunk_store.texts[idx].lower()
+        boost = _keyword_boost(tl, q_lower, terms)
+        sign_score = _chunk_sign_score(chunk_store, idx, q_lower)
+        boost += sign_score
+        final = float(emb_scores[idx]) * (1.0 + boost)
+        scored.append((idx, final, float(emb_scores[idx]), 0, boost))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    print(f"  ✅ ColBERT: {_time.time()-t0:.0f} сек total", flush=True)
+
+    # Контекстное окно ±1
+    used = set()
+    merged = []
+    for idx, final, emb_sim, col_s, boost in scored:
+        source, page = _get_chunk_meta(chunk_store, idx)
+        if not source:
+            continue
+        w = set([idx])
+        for off in range(-1, 2):
+            ni = idx + off
+            if ni < 0 or ni >= n_chunks:
+                continue
+            ns, np_ = _get_chunk_meta(chunk_store, ni)
+            if ns == source and abs(np_ - page) <= 1:
+                w.add(ni)
+        pages = set()
+        for wi in w:
+            _, wp = _get_chunk_meta(chunk_store, wi)
+            pages.add(wp)
+        mp, xp = min(pages), max(pages)
+        rk = f"{source}:{mp}-{xp}"
+        if rk in used:
+            continue
+        used.add(rk)
+        parts = [chunk_store.texts[wi] for wi in sorted(w)]
+        ft = "\n\n".join(parts)
+        bf = _keyword_boost(ft.lower(), q_lower, terms)
+        fs = emb_sim * (1.0 + bf) + max(col_s, 0) * 0.3
+        merged.append((ft, fs, source, mp, xp, bf))
+        if len(merged) >= top_k:
+            break
+
+    merged.sort(key=lambda x: x[1], reverse=True)
+    return merged[:top_k]
+
+
+def search_small_to_big_ru(hipporag, query, top_k=10, candidate_pool=300, context_window=1):
+    chunk_store = hipporag.chunk_embedding_store
+    if len(chunk_store.embeddings) == 0:
+        return []
+    n_chunks = len(chunk_store.texts)
+    bm25 = _build_bm25(chunk_store)
+    terms, q_lower = split_query_terms(query)
+    if not terms:
+        terms = [w for w in query.lower().split() if len(w) > 2]
+    q_emb = hipporag.embedding_model.encode([query])
+    all_emb = np.array(chunk_store.embeddings)
+    emb_scores = np.dot(all_emb, q_emb.T).squeeze()
+    # Query expansion для BM25
+    expanded_terms = _expand_query(q_lower, terms)
+    q_tokens = list(set(_tokenize(query) + expanded_terms))
+    bm25_scores = bm25.get_scores(q_tokens)
+    candidate_idx = np.argsort(bm25_scores)[::-1][:candidate_pool]
+    scored = []
+    for idx in candidate_idx:
+        if idx >= n_chunks:
+            continue
+        text = chunk_store.texts[idx]
+        tl = text.lower()
+        emb = float(emb_scores[idx])
+        boost = _keyword_boost(tl, q_lower, terms)
+        sign_score = _chunk_sign_score(chunk_store, idx, q_lower)
+        boost += sign_score
+        final = emb * (1.0 + boost)
+        scored.append((idx, final, emb, float(bm25_scores[idx]), boost))
+    scored.sort(key=lambda x: x[1], reverse=True)
+
+    try:
+        ce = _get_crossencoder_ru()
+        top_30 = scored[:30]
+        pairs = [(query, chunk_store.texts[idx][:512]) for idx, *_ in top_30]
+        xc_scores = ce.predict(pairs, show_progress_bar=False)
+        for i, (idx, final, emb, bm25_s, boost) in enumerate(top_30):
+            xc = float(xc_scores[i])
+            final = emb * 0.8 * (1.0 + boost) + xc * 0.2
+            scored[i] = (idx, final, emb, bm25_s, boost, xc)
+    except Exception:
+        pass
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    used_ranges = set()
+    merged = []
+
+    for idx, final, emb, bm25_s, boost, *_ in scored:
+        source, page = _get_chunk_meta(chunk_store, idx)
+        if not source:
+            continue
+        window = set([idx])
+        for offset in range(-context_window * 2, context_window * 2 + 1):
+            ni = idx + offset
+            if ni < 0 or ni >= n_chunks:
+                continue
+            ns, np_ = _get_chunk_meta(chunk_store, ni)
+            if ns == source and abs(np_ - page) <= context_window:
+                window.add(ni)
+        pages = set()
+        for wi in window:
+            _, wp = _get_chunk_meta(chunk_store, wi)
+            pages.add(wp)
+        min_p, max_p = min(pages), max(pages)
+        rkey = f"{source}:{min_p}-{max_p}"
+        if rkey in used_ranges:
+            continue
+        used_ranges.add(rkey)
+        parts = [chunk_store.texts[wi] for wi in sorted(window)]
+        full_text = "\n\n".join(parts)
+        boost_final = _keyword_boost(full_text.lower(), q_lower, terms)
+        final_score = final * (1.0 + boost_final * 0.5)
+        merged.append((full_text, final_score, source, min_p, max_p, boost_final))
+        if len(merged) >= top_k:
+            break
+
+    sign_in_result = _sign_in_query(q_lower)
+    if sign_in_result:
+        import re as _re
+        trimmed = []
+        for text, score, source, min_p, max_p, boost in merged:
+            for form in ZODIAC_FORMS.get(sign_in_result, [sign_in_result]):
+                pattern = rf'(?:^|[.!\n])\s*{_re.escape(form.upper())}(?:\s|[:,.!])'
+                m = _re.search(pattern, text, _re.IGNORECASE)
+                if m:
+                    cut_pos = m.start()
+                    if cut_pos > 0:
+                        text = text[cut_pos:]
+                    text = text.lstrip(' .\n\t,;:!?')
+                    break
+            trimmed.append((text, score, source, min_p, max_p, boost))
+        merged = trimmed
+
+    seen_texts = set()
+    deduped = []
+    for text, score, source, min_p, max_p, boost in merged:
+        key = text[:200].lower()
+        if key in seen_texts:
+            continue
+        seen_texts.add(key)
+        deduped.append((text, score, source, min_p, max_p, boost))
+    merged = deduped
+
+    merged.sort(key=lambda x: x[1], reverse=True)
+    return merged[:top_k]
+
+
+def _filter_by_section(candidate_idx, chunk_store, q_lower, keep_general=0.15):
+    """
+    Отфильтровать кандидаты: оставить только чанки из раздела
+    релевантного знака зодиака + немного общих чанков для контекста.
+    """
+    sign = _sign_in_query(q_lower)
+    if not sign:
+        return candidate_idx
+
+    filtered = []
+    general = []
+    for idx in candidate_idx:
+        tl = chunk_store.texts[idx].lower()
+        if _count_sign(tl, sign) > 0:
+            filtered.append(idx)
+        else:
+            general.append(idx)
+
+    keep_gen = max(int(len(candidate_idx) * keep_general), 5)
+    result = filtered + general[:keep_gen]
+    if not filtered:
+        return candidate_idx  # если не нашли ничего — возвращаем всё
+    return result
+
+
+def _llm_filter_results(query, results, max_results=5):
+    """
+    Универсальный LLM-фильтр для результатов любого метода поиска.
+    Отправляет топ-10 результатов в LLM, просит отобрать релевантные.
+    """
+    import httpx, json as _json
+    api_url = LLM_BASE_URL.replace('/v1', '') if '/v1' in LLM_BASE_URL else LLM_BASE_URL
+    try:
+        r = httpx.get(f"{api_url}/v1/models", timeout=3)
+        if r.status_code != 200:
+            return results[:max_results]
+    except:
+        return results[:max_results]
+
+    if not results:
+        return results
+
+    # Собираем топ-10 результатов в json для LLM
+    candidates = []
+    for i, r in enumerate(results[:10]):
+        text = r[0][:300] if isinstance(r, (list, tuple)) and len(r) > 0 else str(r)[:300]
+        source = r[2] if isinstance(r, (list, tuple)) and len(r) > 2 else f"result_{i}"
+        candidates.append({"id": i, "source": str(source), "text": text})
+
+    prompt = {
+        "model": LLM_NAME,
+        "messages": [
+            {"role": "system", "content": (
+                "Ты — фильтр качества поиска. Оцени каждый результат по критериям:\n"
+                "- Содержит ли текст ответ на вопрос?\n"
+                "- Есть ли в тексте ключевые слова из вопроса?\n\n"
+                "Верни JSON-список id релевантных результатов. "
+                "Формат: {\"relevant_ids\": [0, 2, 5]}"
+            )},
+            {"role": "user", "content": (
+                f"Вопрос: {query}\n\n"
+                f"Результаты: {_json.dumps(candidates, ensure_ascii=False)}\n\n"
+                f"Какие id релевантны?"
+            )}
+        ],
+        "max_tokens": 200,
+        "temperature": 0.1,
+    }
+    try:
+        resp = httpx.post(f"{api_url}/v1/chat/completions", json=prompt, timeout=300)
+        if resp.status_code == 200:
+            data = resp.json()
+            msg = data["choices"][0]["message"]
+            content = (msg.get("content") or "").strip()
+            if not content and msg.get("reasoning_content"):
+                rc = msg["reasoning_content"]
+                lines = [l.strip() for l in rc.split('\n') if l.strip()]
+                content = lines[-1].strip('"\'').replace('**', '') if lines else content
+            # Извлекаем JSON
+            import re as _re
+            json_match = _re.search(r'\{.*"relevant_ids".*\}', content, _re.DOTALL)
+            if json_match:
+                filtered = _json.loads(json_match.group())
+                relevant = filtered.get("relevant_ids", [])
+                return [results[i] for i in relevant if i < len(results)]
+    except:
+        pass
+    return results[:max_results]
+
+
+def search_with_llm_filter(hipporag, query):
+    """
+    Комбинация: поиск через Small-to-big + RU-CE (метод 6)
+    + LLM фильтрация нерелевантных результатов.
+    """
+    results = search_small_to_big_ru(hipporag, query, top_k=10)
+    if not results:
+        return []
+    print(f"  🤖 LLM фильтрация {len(results)} результатов...", flush=True)
+    filtered = _llm_filter_results(query, results, max_results=5)
+    print(f"  ✅ После фильтра: {len(filtered)} результатов", flush=True)
+    return filtered if filtered else results[:3]
+
+
+_QWEN_MODEL = None
+_FRIDA_MODEL = None
+
+
+def _get_qwen():
+    global _QWEN_MODEL
+    if _QWEN_MODEL is None:
+        from sentence_transformers import SentenceTransformer
+        print("  ⏳ Загрузка Qwen3-Embedding-0.6B...", flush=True)
+        _QWEN_MODEL = SentenceTransformer('Qwen/Qwen3-Embedding-0.6B')
+        print("  ✅ Qwen3 загружен", flush=True)
+    return _QWEN_MODEL
+
+
+def _get_frida():
+    global _FRIDA_MODEL
+    if _FRIDA_MODEL is None:
+        from sentence_transformers import SentenceTransformer
+        print("  ⏳ Загрузка FRIDA (0.8B)...", flush=True)
+        _FRIDA_MODEL = SentenceTransformer('ai-forever/FRIDA')
+        print("  ✅ FRIDA загружена", flush=True)
+    return _FRIDA_MODEL
+
+
+def search_qwen_frida(hipporag, query, top_k=10):
+    """
+    Метод 18: BM25 + Qwen3-Embedding (dense) + FRIDA (русский reranker) + LLM фильтр.
+    """
+    chunk_store = hipporag.chunk_embedding_store
+    if len(chunk_store.embeddings) == 0:
+        return []
+    n_chunks = len(chunk_store.texts)
+    bm25 = _build_bm25(chunk_store)
+    terms, q_lower = split_query_terms(query)
+    if not terms:
+        terms = [w for w in query.lower().split() if len(w) > 2]
+    exp = _expand_query(q_lower, terms)
+    q_tokens = list(set(_tokenize(query) + exp))
+    bm25_scores = bm25.get_scores(q_tokens)
+    bm25_candidates = np.argsort(bm25_scores)[::-1][:300]
+
+    # Qwen3 dense embedding (только для топ-50 кандидатов)
+    print("  🤖 Qwen3-Embedding...", flush=True)
+    qwen = _get_qwen()
+    q_emb = qwen.encode([f"search_query: {query}"])[0]
+    top50 = bm25_candidates[:50]
+    top_texts = [chunk_store.texts[i] for i in top50]
+    top_embs = qwen.encode([f"search_document: {t}" for t in top_texts])
+
+    # RRF: BM25 + Qwen3
+    bm25_pos = {idx: p for p, idx in enumerate(bm25_candidates)}
+    qwen_scores = np.dot(top_embs, q_emb)
+    qwen_rank = np.argsort(qwen_scores)[::-1]
+    qwen_pos = {top50[i]: p for p, i in enumerate(qwen_rank)}
+    k = 60
+    scored = []
+    for idx in top50:
+        rrf = 1/(k + bm25_pos.get(idx, 1e6)) + 1/(k + qwen_pos.get(idx, 1e6))
+        boost = _keyword_boost(chunk_store.texts[idx].lower(), q_lower, terms)
+        sign_score = _chunk_sign_score(chunk_store, idx, q_lower)
+        boost += sign_score
+        scored.append((idx, rrf, float(qwen_scores[top50.tolist().index(idx)]), boost))
+    for idx in bm25_candidates[50:]:
+        scored.append((idx, 1/(k + bm25_pos.get(idx, 1e6)), 0, 0))
+    scored.sort(key=lambda x: x[1], reverse=True)
+
+    # FRIDA reranking топ-20
+    print("  🤖 FRIDA reranking...", flush=True)
+    frida = _get_frida()
+    top20 = scored[:20]
+    pairs = [(query, chunk_store.texts[idx][:512]) for idx, *_ in top20]
+    frida_scores = frida.encode([f"search_query: {query}" for _ in top20])
+    frida_docs = frida.encode([f"search_document: {chunk_store.texts[idx][:512]}" for idx, *_ in top20])
+    frida_sims = (frida_scores * frida_docs).sum(axis=1)
+
+    for i, (idx, rrf, qs, boost) in enumerate(top20):
+        fs = float(frida_sims[i])
+        final = fs * 0.5 + rrf * 0.3 + qs * 0.2 * (1.0 + boost)
+        top20[i] = (idx, final, fs, boost)
+    top20.sort(key=lambda x: x[1], reverse=True)
+    all_results = [(chunk_store.texts[idx], float(fs), idx) for idx, final, fs, boost in top20]
+    all_results += [(chunk_store.texts[idx], 0, idx) for idx, rrf, qs, boost in scored[20:]]
+
+    # LLM фильтрация
+    print("  🤖 LLM фильтрация...", flush=True)
+    filtered = _llm_filter_results(query, all_results, max_results=5)
+
+    # Контекстное окно ±1 для отфильтрованных
+    used_ranges = set()
+    merged = []
+    for text, fs, idx in filtered:
+        source, page = _get_chunk_meta(chunk_store, idx)
+        if not source:
+            continue
+        window = set([idx])
+        for off in range(-1, 2):
+            ni = idx + off
+            if ni < 0 or ni >= n_chunks:
+                continue
+            ns, np_ = _get_chunk_meta(chunk_store, ni)
+            if ns == source and abs(np_ - page) <= 1:
+                window.add(ni)
+        pages = set()
+        for wi in window:
+            _, wp = _get_chunk_meta(chunk_store, wi)
+            pages.add(wp)
+        mp, xp = min(pages), max(pages)
+        rk = f"{source}:{mp}-{xp}"
+        if rk in used_ranges:
+            continue
+        used_ranges.add(rk)
+        parts = [chunk_store.texts[wi] for wi in sorted(window)]
+        ft = "\n\n".join(parts)
+        bf = _keyword_boost(ft.lower(), q_lower, terms)
+        merged.append((ft, fs, source, mp, xp, bf))
+        if len(merged) >= top_k:
+            break
+
+    merged.sort(key=lambda x: x[1], reverse=True)
+    return merged[:top_k]
+
+
+def search_graphrag_agent(hipporag, query):
+    """
+    Метод 19: GraphRAG Agent.
+    Router → Search → Self-Correction → LLM Answer.
+    Анализирует запрос, выбирает лучший метод, проверяет качество,
+    при необходимости переформулирует и пробует снова.
+    """
+    import httpx, time as _time
+    api_url = LLM_BASE_URL.replace('/v1', '') if '/v1' in LLM_BASE_URL else LLM_BASE_URL
+    terms, q_lower = split_query_terms(query)
+    exp_terms = _expand_query(q_lower, terms)
+    chunk_store = hipporag.chunk_embedding_store
+    bm25 = _build_bm25(chunk_store)
+
+    def has_any_term(text, term_list):
+        tl = text.lower()
+        return any(t in tl for t in term_list if len(t) > 2)
+
+    # --- Шаг 1: Router — определяем тип запроса ---
+    is_global = any(w in q_lower for w in ['перечисли', 'список', 'все', 'какие', 'сколько'])
+    is_relation = any(w in q_lower for w in ['связан', 'отличается', 'общего', 'связь'])
+    is_multi_hop = len(terms) >= 4 and not is_global
+
+    # --- Шаг 2: Выбираем метод ---
+    s2b = lambda q: search_small_to_big_ru(hipporag, q, top_k=8)
+    bm25ru = lambda q: search_bm25_hybrid_ru(hipporag, q, top_k=8)
+    rrf = lambda q: search_rrf_context(hipporag, q, top_k=8)
+    filt = lambda q: search_filtered(hipporag, q, top_k=8)
+    srag = lambda q: search_self_rag(hipporag, q)
+
+    methods = []
+    if is_global:
+        methods = [(rrf, "RRF"), (s2b, "Small→Big")]
+    elif is_relation:
+        methods = [(filt, "Filter"), (rrf, "RRF")]
+    elif is_multi_hop:
+        methods = [(srag, "Self-RAG"), (s2b, "Small→Big")]
+    else:
+        methods = [(bm25ru, "BM25+RU"), (s2b, "Small→Big")]
+
+    # Исправляем search_and_check: передаём lambda без top_k
+    def search_and_check2(fn, name, tk=8):
+        t0 = _time.time()
+        try:
+            res = fn(query)
+        except:
+            res = []
+        dt = _time.time() - t0
+        if not res:
+            return [], 0, dt
+        relevant = sum(1 for r in res if has_any_term(r[0] if isinstance(r, (list, tuple)) else str(r), exp_terms))
+        return res, relevant / max(len(res), 1), dt
+
+    # --- Шаг 3: Каскадный поиск с самокоррекцией ---
+    best_results = []
+    best_quality = 0
+    best_method = ""
+    log = []
+
+    for fn, name in methods:
+        if best_quality >= 0.8:
+            break
+        res, quality, dt = search_and_check2(fn, name)
+        log.append(f"{name}: quality={quality:.0%} ({dt:.0f}s)")
+        print(f"  📊 {log[-1]}", flush=True)
+        if quality > best_quality:
+            best_results = res
+            best_quality = quality
+            best_method = name
+
+    # Если все методы дали плохой результат — пробуем LLM переформулировку
+    if best_quality < 0.3:
+        try:
+            r = httpx.get(f"{api_url}/v1/models", timeout=3)
+            if r.status_code == 200:
+                prompt = {
+                    "model": LLM_NAME,
+                    "messages": [
+                        {"role": "system", "content": "Переформулируй запрос для поиска. Выдели 2-5 ключевых слов."},
+                        {"role": "user", "content": f"Запрос: {query}"}
+                    ],
+                    "max_tokens": 100,
+                    "temperature": 0.1,
+                }
+                resp = httpx.post(f"{api_url}/v1/chat/completions", json=prompt, timeout=300)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    msg = data["choices"][0]["message"]
+                    new_q = (msg.get("content") or "").strip().strip('"\'')
+
+                    if new_q and 5 < len(new_q) < 100:
+                        print(f"  🔄 Переформулировка: '{query}' → '{new_q}'", flush=True)
+                        rrf_retry = lambda q: search_rrf_context(hipporag, q, top_k=10)
+                        res, quality, dt = search_and_check2(rrf_retry, "RRF(retry)", tk=10)
+                        if quality > best_quality:
+                            best_results = res
+                            best_method = "RRF(retry)"
+                            log.append(f"RRF(retry): quality={quality:.0%}")
+        except:
+            pass
+
+    # Если лучший метод — Self-RAG, используем его ответ напрямую
+    if best_method == "Self-RAG" and best_results:
+        return best_results[:1]
+
+    # --- Шаг 4: LLM формирует ответ ---
+    if best_results:
+        # Собираем текст
+        chunks_text = ""
+        for i, r in enumerate(best_results[:5]):
+            doc = r[0] if isinstance(r, (list, tuple)) else str(r)
+            src = r[2] if isinstance(r, (list, tuple)) and len(r) > 2 else ""
+            src_str = str(src) if src else ""
+            chunks_text += f"\n[Источник {i+1} {src_str}]\n{doc[:1000]}\n"
+
+        answer = None
+        try:
+            r = httpx.get(f"{api_url}/v1/models", timeout=3)
+            if r.status_code == 200:
+                prompt = {
+                    "model": LLM_NAME,
+                    "messages": [
+                        {"role": "system", "content": (
+                            "Ответь на вопрос на основе источников.\n\n"
+                            "АЛГОРИТМ:\n"
+                            "1. Найди в источниках прямые ответы и соответствия\n"
+                            "2. Для вопросов вида «какая планета отвечает за зону» — "
+                            "ищи «знаку соответствует зона» + «управитель знака — планета»\n"
+                            "3. Для вопросов «перечисли всё» — выведи полный список\n"
+                            "4. Ссылайся на источники: [Источник 1]\n"
+                            "5. Если в источниках нет ответа — напиши «нет данных»"
+                        )},
+                        {"role": "user", "content": f"Вопрос: {query}\n\nИсточники:\n{chunks_text}"}
+                    ],
+                    "max_tokens": 2048,
+                    "temperature": 0.15,
+                }
+                resp = httpx.post(f"{api_url}/v1/chat/completions", json=prompt, timeout=300)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    msg = data["choices"][0]["message"]
+                    answer = (msg.get("content") or "").strip()
+                    if not answer and msg.get("reasoning_content"):
+                        rc = msg["reasoning_content"]
+                        lines = [l.strip() for l in rc.split('\n') if l.strip()]
+                        answer = lines[-1].strip('"\'').replace('**', '') if lines else answer
+        except:
+            pass
+
+def search_sentence_level(hipporag, query, top_k=10):
+    import re as _re
+    chunk_store = hipporag.chunk_embedding_store
+    bm25 = _build_bm25(chunk_store)
+    terms, q_lower = split_query_terms(query)
+    exp = _expand_query(q_lower, terms)
+    q_tokens = list(set(_tokenize(query) + exp))
+    if not hasattr(search_sentence_level, "sentences_cache"):
+        sents = []
+        for idx, text in enumerate(chunk_store.texts):
+            for s in _re.split(r'(?<=[.!?])\s+', text):
+                s = s.strip()
+                if len(s) > 15:
+                    sents.append((s.lower(), s, idx))
+        search_sentence_level.sentences_cache = sents
+        print(f"  Предложений: {len(sents)}", flush=True)
+    sentences = search_sentence_level.sentences_cache
+    sent_tokens = [_tokenize(s[0]) for s in sentences]
+    sent_bm25 = BM25Okapi(sent_tokens)
+    sent_scores = sent_bm25.get_scores(q_tokens)
+    sent_rank = np.argsort(sent_scores)[::-1]
+    seen_chunks = set()
+    merged = []
+    for si in sent_rank:
+        if sent_scores[si] == 0:
+            continue
+        sent_lower, sent_orig, chunk_idx = sentences[si]
+        if chunk_idx in seen_chunks:
+            continue
+        seen_chunks.add(chunk_idx)
+        source, page = _get_chunk_meta(chunk_store, chunk_idx)
+        full_text = chunk_store.texts[chunk_idx]
+        boost = _keyword_boost(full_text.lower(), q_lower, terms)
+        sign_score = _chunk_sign_score(chunk_store, chunk_idx, q_lower)
+        boost += sign_score
+        final_score = float(sent_scores[si]) * (1.0 + boost)
+        display_text = full_text.replace(sent_orig, f"\u2192{sent_orig}\u2190", 1) if sent_orig in full_text else full_text
+        merged.append((display_text, final_score, source or "", page, 0, boost))
+        if len(merged) >= top_k:
+            break
+    if not merged:
+        return search_small_to_big_ru(hipporag, query, top_k=min(5, top_k))
+    merged.sort(key=lambda x: x[1], reverse=True)
+    return merged[:top_k]
+
+
+def _dat_evaluate(query, sent_top1, dense_top1):
+    import httpx
+    api_url = LLM_BASE_URL.replace('/v1', '') if '/v1' in LLM_BASE_URL else LLM_BASE_URL
+    if not sent_top1 or not dense_top1:
+        return 3, 3
+    prompt_text = (
+        "Ты — оценщик качества поиска. Оцени два результата поиска по шкале от 0 до 5.\n\n"
+        "Критерии:\n"
+        "5 — документ напрямую отвечает на вопрос\n"
+        "3-4 — концептуально близок, содержит частичный ответ или связанные сущности\n"
+        "1-2 — слабо связан, вводит в заблуждение\n"
+        "0 — полностью нерелевантен\n\n"
+        f"Вопрос: {query}\n\n"
+        f"Результат 1 (поиск по предложениям):\n{sent_top1[:500]}\n\n"
+        f"Результат 2 (семантический поиск):\n{dense_top1[:500]}\n\n"
+        "Верни два числа через пробел: оценка_1 оценка_2.\nПример: 4 3"
+    )
+    for attempt in range(2):
+        try:
+            r = httpx.post(f"{api_url}/v1/chat/completions", json={
+                "model": LLM_NAME,
+                "messages": [{"role": "user", "content": prompt_text}],
+                "max_tokens": 50,
+                "temperature": 0.1,
+            }, timeout=300)
+            if r.status_code == 200:
+                content = r.json()["choices"][0]["message"].get("content", "").strip()
+                nums = re.findall(r'\d+', content)
+                if len(nums) >= 2:
+                    return min(int(nums[0]), 5), min(int(nums[1]), 5)
+                if attempt == 0:
+                    prompt_text += "\n\nОтветь ТОЛЬКО двумя числами через пробел."
+                    continue
+        except:
+            if attempt == 0:
+                continue
+    return 3, 3
+
+
+def _dat_compute_alpha(score_sentence, score_dense):
+    if score_sentence == 0 and score_dense == 0:
+        return 0.5
+    if score_dense == 5 and score_sentence != 5:
+        return 1.0
+    if score_sentence == 5 and score_dense != 5:
+        return 0.0
+    denom = score_dense + score_sentence
+    if denom == 0:
+        return 0.5
+    return round(score_dense / denom, 1)
+
+
+def _dat_combine_results(sentence_results, dense_results, alpha, top_k=15):
+    combined = {}
+    s_scores = [r[1] for r in sentence_results] if sentence_results else [0]
+    s_max, s_min = max(s_scores), min(s_scores)
+    s_range = s_max - s_min if s_max > s_min else 1
+    d_scores = [r[1] for r in dense_results] if dense_results else [0]
+    d_max, d_min = max(d_scores), min(d_scores)
+    d_range = d_max - d_min if d_max > d_min else 1
+    for r in sentence_results:
+        text, score = r[0], r[1]
+        src = r[2] if len(r) > 2 else ""
+        pg = r[3] if len(r) > 3 else 0
+        norm = (score - s_min) / s_range
+        if str(text)[:200].strip() in combined:
+            combined[str(text)[:200].strip()]["s_norm"] = norm
+        else:
+            combined[str(text)[:200].strip()] = {"text": text, "source": src, "page": pg, "s_norm": norm, "d_norm": 0.0}
+    for r in dense_results:
+        text, score = str(r[0]) if not isinstance(r[0], str) else r[0], r[1]
+        src = r[2] if len(r) > 2 else ""
+        pg = r[3] if len(r) > 3 else 0
+        norm = (score - d_min) / d_range
+        k = str(text)[:200].strip()
+        if k in combined:
+            combined[k]["d_norm"] = norm
+        else:
+            combined[k] = {"text": text, "source": src, "page": pg, "s_norm": 0.0, "d_norm": norm}
+    for v in combined.values():
+        v["final"] = alpha * v["d_norm"] + (1 - alpha) * v["s_norm"]
+    sorted_items = sorted(combined.values(), key=lambda x: x["final"], reverse=True)
+    return [(v["text"], v["final"], v["source"], v["page"], 0, v["final"]) for v in sorted_items[:top_k]]
+
+
+def search_dat_sentence_llm(hipporag, query, top_k=10):
+    import httpx, time as _time
+    api_url = LLM_BASE_URL.replace('/v1', '') if '/v1' in LLM_BASE_URL else LLM_BASE_URL
+    t0 = _time.time()
+    print(f"  DAT Sentence-level + LLM", flush=True)
+    sentence_results = search_sentence_level(hipporag, query, top_k=30)
+    t1 = _time.time()
+    print(f"  Sentence-level: {len(sentence_results)} рез. ({t1-t0:.1f}с)", flush=True)
+    dense_results = search_small_to_big_ru(hipporag, query, top_k=30)
+    t2 = _time.time()
+    print(f"  Dense: {len(dense_results)} рез. ({t2-t1:.1f}с)", flush=True)
+    sent_top1_text = sentence_results[0][0][:500] if sentence_results and len(sentence_results[0]) > 0 else ""
+    dense_top1_text = dense_results[0][0][:500] if dense_results and len(dense_results[0]) > 0 else ""
+    s_score, d_score = _dat_evaluate(query, sent_top1_text, dense_top1_text)
+    alpha = _dat_compute_alpha(s_score, d_score)
+    t3 = _time.time()
+    print(f"  DAT: sentence={s_score}/5, dense={d_score}/5 -> alpha={alpha} ({t3-t2:.1f}с)", flush=True)
+    combined = _dat_combine_results(sentence_results, dense_results, alpha, top_k=15)
+    if not combined:
+        combined = sentence_results[:top_k]
+    t4 = _time.time()
+    print(f"  Combined: {len(combined)} рез. ({t4-t3:.1f}с)", flush=True)
+    chunks_text = ""
+    for i, r in enumerate(combined[:8], 1):
+        text = r[0] if isinstance(r, tuple) and len(r) > 0 else str(r)
+        src = r[2] if isinstance(r, tuple) and len(r) > 2 else ""
+        pg = r[3] if isinstance(r, tuple) and len(r) > 3 else 0
+        chunks_text += f"\n[Источник {i} - {src} стр.{pg}]\n{text[:1500]}\n"
+    answer = None
+    prompt_base = {
+        "model": LLM_NAME,
+        "messages": [
+            {"role": "system", "content": (
+                "Ты \u2014 эксперт по астрологии и фэншуй. "
+                "Ответь на вопрос, используя ТОЛЬКО текст источников.\n\n"
+                "В тексте знаки зодиака сопоставляются с зонами квартиры через тире: "
+                "\u00abЗНАК \u2014 ЗОНА\u00bb. Например: \u00abОвен \u2014 прихожая, ... \u2014 плита\u00bb.\n\n"
+                "Таблица планет-управителей:\n"
+                "Овен \u2192 Марс, Телец \u2192 Венера, Близнецы \u2192 Меркурий, Рак \u2192 Луна, "
+                "Лев \u2192 Солнце, Дева \u2192 Меркурий, Весы \u2192 Венера, "
+                "Скорпион \u2192 Плутон/Марс, Стрелец \u2192 Юпитер, "
+                "Козерог \u2192 Сатурн, Водолей \u2192 Уран, Рыбы \u2192 Нептун\n\n"
+                "Алгоритм:\n"
+                "1. Найди \u00abЗНАК \u2014 ... ЗОНА\u00bb в источниках\n"
+                "2. Определи планету-управителя знака\n"
+                "3. Вывод: планета отвечает за зону\n"
+                "4. Пример: \u00abОВЕН \u2014 плита\u00bb + Овен\u2192Марс \u2192 Марс отвечает за плиту\n"
+                "5. Если нет данных \u2014 напиши \u00abнет данных\u00bb"
+            )},
+            {"role": "user", "content": f"Вопрос: {query}\n\nИсточники:\n{chunks_text}"}
+        ],
+        "max_tokens": 2048,
+        "temperature": 0.15,
+    }
+    prompts_to_try = [
+        prompt_base,
+        {"model": LLM_NAME, "messages": [{"role": "user", "content": f"Вопрос: {query}\n\nИсточники:\n{chunks_text}"}], "max_tokens": 1024, "temperature": 0.1},
+        {"model": LLM_NAME, "messages": [{"role": "user", "content": f"{query}\n\n{chunks_text[:500]}"}], "max_tokens": 512, "temperature": 0.1},
+    ]
+    for attempt, prompt in enumerate(prompts_to_try):
+        try:
+            resp = httpx.post(f"{api_url}/v1/chat/completions", json=prompt, timeout=300)
+            if resp.status_code == 200:
+                data = resp.json()
+                msg = data["choices"][0]["message"]
+                finish = data["choices"][0].get("finish_reason", "")
+                content = (msg.get("content") or "").strip()
+                if content:
+                    answer = content
+                    break
+                rc = msg.get("reasoning_content", "") or msg.get("reasoning", "") or ""
+                if rc:
+                    m = re.search(r'(?:Ответ|Answer)\s*:?\s*(.+)', rc, re.IGNORECASE | re.DOTALL)
+                    if m:
+                        answer = m.group(1).strip()
+                        break
+                    m = re.search(r'So the answer is:\s*(.+)', rc, re.IGNORECASE)
+                    if m:
+                        answer = m.group(1).strip()
+                        break
+                    lines = [l.strip() for l in rc.split('\n') if l.strip()]
+                    if lines:
+                        answer = lines[-1].strip('"\'').replace('**', '').strip()
+                        break
+                print(f"  LLM пусто: попытка {attempt+1}, finish={finish}", flush=True)
+        except Exception as e:
+            print(f"  LLM error (попытка {attempt+1}): {e}", flush=True)
+
+    t5 = _time.time()
+    print(f"  LLM ответ: {len(answer or '')} симв. ({t5-t4:.1f}с)", flush=True)
+    print(f"  Всего: {t5-t0:.1f}с", flush=True)
+
+    if not answer:
+        # LLM-free fallback: извлекаем "ЗНАК — ЗОНА" из результатов и строим ответ
+        SIGN_PLANET = {
+            'овен': 'Марс', 'телец': 'Венера', 'близнецы': 'Меркурий',
+            'рак': 'Луна', 'лев': 'Солнце', 'дева': 'Меркурий',
+            'весы': 'Венера', 'скорпион': 'Плутон', 'стрелец': 'Юпитер',
+            'козерог': 'Сатурн', 'водолей': 'Уран', 'рыбы': 'Нептун',
+        }
+        best_match = None
+        # Берём sentence-level результаты (они точнее по смыслу)
+        for r in sentence_results:
+            txt = (r[0] if isinstance(r, tuple) and len(r) > 0 else str(r)).lower()
+            for sign, planet in SIGN_PLANET.items():
+                m = re.search(rf'{sign}\s*—\s*[^.]{{0,200}}?плит', txt)
+                if m:
+                    start = max(0, m.start() - 20)
+                    ctx = txt[start:m.end() + 30]
+                    best_match = (sign.capitalize(), planet, ctx)
+                    break
+            if best_match:
+                break
+        if best_match:
+            answer = f"По данным источников, за плиту отвечает планета {best_match[1]} (через знак {best_match[0]})."
+            print(f"  LLM-free fallback: {best_match[0]} \u2192 {best_match[1]}", flush=True)
+        else:
+            return combined[:top_k]
+
+    result_text = (
+        f"=== ОТВЕТ ===\n\n{answer}\n\n"
+        f"=== МЕТОД ===\n"
+        f"DAT Sentence-level + LLM | alpha={alpha} (sentence={s_score}/5, dense={d_score}/5)\n"
+        f"Время: {t5-t0:.1f}с\n\n"
+        f"=== ИСТОЧНИКИ ===\n{chunks_text[:3000]}"
+    )
+    return [(result_text, 999.0, 0, 0, 0)]
+
+
+def search_self_rag(hipporag, query, top_k=30):
+    """
+    Self-RAG: BM25 (с expansion) → LLM формулирует ответ.
+    Использует чистый BM25 (без эмбеддингов) чтобы не терять редкие чанки.
+    """
+    import httpx
+    api_url = LLM_BASE_URL.replace('/v1', '') if '/v1' in LLM_BASE_URL else LLM_BASE_URL
+    _, q_lower = split_query_terms(query)
+    terms, _ = split_query_terms(query)
+
+    # Шаг 1: BM25 + expansion (без эмбеддингов — они топят редкие чанки)
+    chunk_store = hipporag.chunk_embedding_store
+    bm25 = _build_bm25(chunk_store)
+    exp = _expand_query(q_lower, terms)
+    q_tokens = list(set(_tokenize(query) + exp))
+    bm25_scores = bm25.get_scores(q_tokens)
+    candidate_idx = np.argsort(bm25_scores)[::-1][:500]
+
+    # Собираем топ-15 чанков через BM25 + sign dominance
+    scored = []
+    for idx in candidate_idx:
+        tl = chunk_store.texts[idx].lower()
+        boost = _keyword_boost(tl, q_lower, terms)
+        sign_score = _chunk_sign_score(chunk_store, idx, q_lower)
+        boost += sign_score
+        final = bm25_scores[idx] * (1.0 + boost)
+        scored.append((chunk_store.texts[idx], float(bm25_scores[idx]), boost, idx))
+    scored.sort(key=lambda x: x[1], reverse=True)
+
+    # Контекстное окно: добавляем соседние чанки
+    used_ranges = set()
+    merged = []
+    for text, bm25_s, boost, idx in scored:
+        source, page = _get_chunk_meta(chunk_store, idx)
+        if not source:
+            continue
+        window = set([idx])
+        for off in range(-1, 2):
+            ni = idx + off
+            if ni < 0 or ni >= len(chunk_store.texts):
+                continue
+            ns, np_ = _get_chunk_meta(chunk_store, ni)
+            if ns == source and abs(np_ - page) <= 1:
+                window.add(ni)
+        pages = set()
+        for wi in window:
+            _, wp = _get_chunk_meta(chunk_store, wi)
+            pages.add(wp)
+        mp, xp = min(pages), max(pages)
+        rk = f"{source}:{mp}-{xp}"
+        if rk in used_ranges:
+            continue
+        used_ranges.add(rk)
+        parts = [chunk_store.texts[wi] for wi in sorted(window)]
+        merged.append(("\n\n".join(parts), source, mp, xp))
+        if len(merged) >= top_k:
+            break
+
+    # Шаг 2: собираем текст чанков для LLM
+    chunks_text = ""
+    for i, (text, source, mp, xp) in enumerate(merged, 1):
+        chunks_text += f"\n[Источник {i} — {source} стр.{mp}-{xp}]\n{text[:1200]}\n"
+
+    # Шаг 3: LLM
+    answer = None
+    try:
+        r_health = httpx.get(f"{api_url}/v1/models", timeout=3)
+        if r_health.status_code == 200:
+            prompt = {
+                "model": LLM_NAME,
+                "messages": [
+                    {"role": "system", "content": (
+                        "Ответь на вопрос читателя, используя ТОЛЬКО текст источников.\n\n"
+                        "АЛГОРИТМ:\n"
+                        "1. Найди в источниках соответствия «планета → зона» (МАРС символизирует прихожую)\n"
+                        "2. Найди в источниках описания знаков зодиака вида:\n"
+                        "   «ЗНАКУ соответствует зона ПЛИТА» и «управитель ЗНАКА — МАРС»\n"
+                        "3. СДЕЛАЙ ВЫВОД: если знаку ОВЕН соответствует зона ПЛИТА, "
+                        "а управитель знака ОВЕН — МАРС, то планета МАРС отвечает за зону ПЛИТА\n"
+                        "4. Если данных недостаточно — перечисли ВСЕ найденные соответствия\n"
+                        "5. Для каждого пункта укажи источник: [Источник 1]"
+                    )},
+                    {"role": "user", "content": (
+                        f"Вопрос: {query}\n\n"
+                        f"Источники:\n{chunks_text}\n\n"
+                        f"Ответь на основе источников."
+                    )}
+                ],
+                "max_tokens": 2048,
+                "temperature": 0.15,
+            }
+            resp = httpx.post(f"{api_url}/v1/chat/completions", json=prompt, timeout=300)
+            if resp.status_code == 200:
+                data = resp.json()
+                msg = data["choices"][0]["message"]
+                answer = (msg.get("content") or "").strip()
+                if not answer and msg.get("reasoning_content"):
+                    rc = msg["reasoning_content"]
+                    lines = [l.strip() for l in rc.split('\n') if l.strip()]
+                    answer = lines[-1].strip('"\'').replace('**', '') if lines else answer
+    except Exception:
+        pass
+
+    if not answer:
+        return [(scored[0][0], scored[0][1], "", 0, 0, 0)]
+
+    result_text = f"=== ОТВЕТ ===\n\n{answer}\n\n=== ИСТОЧНИКИ ===\n{chunks_text[:3000]}"
+    return [(result_text, 999.0, 0, 0, 0)]
+
+
+def extract_sign_full(hipporag, query):
+    """
+    Извлечь ВЕСЬ материал по знаку зодиака, сохранить в DOCX/TXT.
+    """
+    from docx import Document
+    from docx.shared import Pt, Inches
+    from pathlib import Path
+
+    chunk_store = hipporag.chunk_embedding_store
+    if len(chunk_store.embeddings) == 0:
+        return []
+
+    n_chunks = len(chunk_store.texts)
+    q_lower = query.lower()
+    sign = _sign_in_query(q_lower)
+    if not sign:
+        return [("Не указан знак зодиака в запросе", 0, "", 0, 0, 0)]
+
+    # Собираем ВСЕ чанки, где упоминается знак
+    sign_chunks = []
+    for idx in range(n_chunks):
+        tl = chunk_store.texts[idx].lower()
+        if _count_sign(tl, sign) > 0:
+            source, page = _get_chunk_meta(chunk_store, idx)
+            sign_chunks.append((idx, source, page, chunk_store.texts[idx]))
+
+    if not sign_chunks:
+        return [(f"Материал по знаку '{sign}' не найден", 0, "", 0, 0, 0)]
+
+    # Сортируем по источнику и странице
+    sign_chunks.sort(key=lambda x: (x[1], x[2], x[0]))
+
+    # Склеиваем
+    full_text_parts = []
+    prev_source = None
+    prev_page = 0
+    for idx, source, page, text in sign_chunks:
+        if prev_source and source != prev_source:
+            full_text_parts.append(f"\n\n=== {source} ===\n")
+        if page != prev_page + 1 and prev_source:
+            full_text_parts.append(f"\n[...стр.{page}]\n")
+        full_text_parts.append(text)
+        prev_source = source
+        prev_page = page
+
+    full_text = "\n".join(full_text_parts)
+    total_chars = len(full_text)
+    total_chunks = len(sign_chunks)
+
+    # Сохраняем в DOCX
+    out_dir = Path("outputs/reports")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fname = out_dir / f"{sign}.docx"
+
+    doc = Document()
+    style = doc.styles['Normal']
+    font = style.font
+    font.name = 'Arial'
+    font.size = Pt(11)
+
+    doc.add_heading(f'Материал по знаку: {sign.upper()}', level=1)
+    doc.add_paragraph(f'Источник: книга Ирины Максимовой «Астрофэншуй квартиры»')
+    doc.add_paragraph(f'Всего чанков: {total_chunks}, символов: {total_chars}')
+    doc.add_paragraph('')
+
+    prev_source = None
+    for idx, source, page, text in sign_chunks:
+        if prev_source and source != prev_source:
+            doc.add_page_break()
+            doc.add_heading(f'{source}', level=2)
+        doc.add_paragraph(text)
+        prev_source = source
+
+    doc.save(str(fname))
+    size_kb = total_chars // 1024
+
+    result_text = (
+        f"Файл сохранён: {fname}\n"
+        f"Знак: {sign}\n"
+        f"Чанков: {total_chunks} | Символов: {total_chars} (~{size_kb} KB)\n"
+        f"--- Начало материала ({min(1500, total_chars)} симв.) ---\n\n"
+        f"{full_text[:1500]}"
     )
 
-    logging.basicConfig(level=logging.INFO)
+    return [(result_text, total_chunks, sign, total_chars, 0, 0)]
 
+
+def extract_sign_polished(hipporag, query):
+    """
+    Извлечь материал по знаку, обработать LLM: убрать лишнее,
+    сгладить переходы, сохранить стиль автора. Сохранить в DOCX.
+    """
+    import httpx
+    from pathlib import Path
+    from docx import Document
+    from docx.shared import Pt
+
+    api_url = LLM_BASE_URL.replace('/v1', '') if '/v1' in LLM_BASE_URL else LLM_BASE_URL
+    chunk_store = hipporag.chunk_embedding_store
+    n_chunks = len(chunk_store.texts)
+    q_lower = query.lower()
+    sign = _sign_in_query(q_lower)
+    if not sign:
+        return [("Не указан знак зодиака в запросе", 0, "", 0, 0, 0)]
+
+    # Собираем чанки
+    sign_chunks = []
+    for idx in range(n_chunks):
+        tl = chunk_store.texts[idx].lower()
+        if _count_sign(tl, sign) > 0:
+            source, page = _get_chunk_meta(chunk_store, idx)
+            sign_chunks.append((idx, source, page, chunk_store.texts[idx]))
+
+    if not sign_chunks:
+        return [(f"Материал по знаку '{sign}' не найден", 0, "", 0, 0, 0)]
+
+    sign_chunks.sort(key=lambda x: (x[1], x[2], x[0]))
+    full_text = "\n\n".join(c[3] for c in sign_chunks)
+    total_chunks = len(sign_chunks)
+
+    # Проверяем LLM
+    print(f"  📄 Собрано {total_chunks} чанков, {len(full_text)} символов")
+    polished = None
+    try:
+        print(f"  🔍 Проверка LM Studio...")
+        r = httpx.get(f"{api_url}/v1/models", timeout=3)
+        if r.status_code == 200:
+            # Если текст большой — обрабатываем по частям
+            MAX_CHUNK = 3000
+            text_parts = []
+            remaining = full_text
+            while remaining:
+                text_parts.append(remaining[:MAX_CHUNK])
+                remaining = remaining[MAX_CHUNK:]
+
+            print(f"  🤖 LLM-обработка: {len(text_parts)} частей по {MAX_CHUNK} символов")
+            polished_parts = []
+            for i, part in enumerate(text_parts):
+                print(f"     Часть {i+1}/{len(text_parts)}...", end='', flush=True)
+                prompt = {
+                    "model": LLM_NAME,
+                    "messages": [
+                        {"role": "system", "content": (
+                            "Ты — литературный редактор книги Ирины Максимовой «Астрофэншуй квартиры». "
+                            f"Твоя задача: обработать отрывок текста о знаке зодиака «{sign}».\n\n"
+                            "Правила обработки:\n"
+                            "1. Удали информацию, НЕ относящуюся к этому знаку зодиака\n"
+                            "2. Сгладь переходы между фрагментами — добавь связующие предложения "
+                            "в стиле автора (Ирина Максимова пишет живо, с примерами из практики)\n"
+                            "3. Сохрани авторский стиль: личные наблюдения, примеры из практики, "
+                            "астрологические термины, фэншуй термины\n"
+                            "4. НЕ меняй факты, рекомендации, названия планет и зон\n"
+                            "5. Если отрывок начинается с середины мысли — коротко восстанови контекст "
+                            "(1-2 предложения в стиле автора)\n"
+                            "6. Сохрани все практические советы и нумерацию шагов ремонта\n\n"
+                            "Верни ТОЛЬКО обработанный текст, без комментариев."
+                        )},
+                        {"role": "user", "content": (
+                            f"Часть {i+1} из {len(text_parts)} материала про знак {sign}:\n\n{part}"
+                        )}
+                    ],
+                    "max_tokens": 4096,
+                    "temperature": 0.2,
+                }
+                resp = httpx.post(f"{api_url}/v1/chat/completions", json=prompt, timeout=300)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    msg = data["choices"][0]["message"]
+                    content = (msg.get("content") or "").strip()
+                    if not content and msg.get("reasoning_content"):
+                        rc = msg["reasoning_content"]
+                        lines = [l.strip() for l in rc.split('\n') if l.strip()]
+                        content = lines[-1].strip('"\'').replace('**', '') if lines else ""
+                    polished_parts.append(content)
+                    print(f" ✓")
+                else:
+                    print(f" ⚠️ LLM ответил {resp.status_code}, использую原文")
+                    polished_parts.append(part)
+
+            if polished_parts:
+                polished = "\n\n".join(polished_parts)
+                print(f"  ✅ Обработка завершена: {len(polished)} символов")
+    except Exception as e:
+        print(f"  ⚠️ Ошибка LLM: {e}")
+
+    if not polished:
+        return [(f"LLM недоступен. Сохранён необработанный материал.", 0, sign, 0, 0, 0)] + \
+               extract_sign_full(hipporag, query)
+
+    # Сохраняем DOCX
+    out_dir = Path("outputs/reports")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fname = out_dir / f"{sign}_polished.docx"
+
+    doc = Document()
+    style = doc.styles['Normal']
+    style.font.name = 'Arial'
+    style.font.size = Pt(11)
+    doc.add_heading(f'{sign.upper()} — Астрофэншуй квартиры', level=1)
+    doc.add_paragraph(f'Обработано с сохранением стиля автора')
+    doc.add_paragraph('')
+
+    for paragraph in polished.split('\n\n'):
+        p = paragraph.strip()
+        if not p:
+            continue
+        if p.isupper() and len(p) < 60:
+            doc.add_heading(p, level=2)
+        else:
+            doc.add_paragraph(p)
+
+    doc.save(str(fname))
+
+    result_text = (
+        f"✅ Материал обработан и сохранён\n"
+        f">>> Файл: {fname} <<<\n\n"
+        f"--- Начало материала ---\n{polished[:2000]}"
+    )
+
+    return [(result_text, total_chunks, sign, len(polished), 0, 0)]
+
+
+def extract_sign_summary(hipporag, query):
+    """
+    Извлечь материал по знаку, сохранить в DOCX + краткое резюме через LLM.
+    """
+    import httpx
+    from pathlib import Path
+    from docx import Document
+    from docx.shared import Pt
+
+    api_url = LLM_BASE_URL.replace('/v1', '') if '/v1' in LLM_BASE_URL else LLM_BASE_URL
+
+    # 1. Получаем все чанки (как в extract_sign_full, но без сохранения)
+    chunk_store = hipporag.chunk_embedding_store
+    n_chunks = len(chunk_store.texts)
+    q_lower = query.lower()
+    sign = _sign_in_query(q_lower)
+    if not sign:
+        return [("Не указан знак зодиака в запросе", 0, "", 0, 0, 0)]
+
+    sign_chunks = []
+    for idx in range(n_chunks):
+        tl = chunk_store.texts[idx].lower()
+        if _count_sign(tl, sign) > 0:
+            source, page = _get_chunk_meta(chunk_store, idx)
+            sign_chunks.append((idx, source, page, chunk_store.texts[idx]))
+
+    if not sign_chunks:
+        return [(f"Материал по знаку '{sign}' не найден", 0, "", 0, 0, 0)]
+
+    sign_chunks.sort(key=lambda x: (x[1], x[2], x[0]))
+    full_text = "\n".join(c[3] for c in sign_chunks)
+    total_chars = len(full_text)
+    total_chunks = len(sign_chunks)
+
+    # 2. Сохраняем DOCX
+    out_dir = Path("outputs/reports")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fname = out_dir / f"{sign}.docx"
+
+    doc = Document()
+    style = doc.styles['Normal']
+    style.font.name = 'Arial'
+    style.font.size = Pt(11)
+    doc.add_heading(f'Материал по знаку: {sign.upper()}', level=1)
+    doc.add_paragraph(f'Источник: Ирина Максимова «Астрофэншуй квартиры»')
+    doc.add_paragraph(f'Чанков: {total_chunks}, символов: {total_chars}')
+    doc.add_paragraph('')
+    prev_source = None
+    for idx, source, page, text in sign_chunks:
+        if prev_source and source != prev_source:
+            doc.add_page_break()
+            doc.add_heading(f'{source}', level=2)
+        doc.add_paragraph(text)
+        prev_source = source
+    doc.save(str(fname))
+
+    # 3. Резюме через LLM
+    input_text = full_text[:4000] + "\n\n[...]\n\n" + full_text[-4000:] if len(full_text) > 8000 else full_text
+    summary = "Резюме недоступно (LLM не отвечает)"
+    try:
+        r = httpx.get(f"{api_url}/v1/models", timeout=3)
+        if r.status_code == 200:
+            prompt = {
+                "model": LLM_NAME,
+                "messages": [
+                    {"role": "system", "content": (
+                        "Ты — эксперт по астрологии и фэншуй. Составь краткое резюме "
+                        "по знаку зодиака. Выдели: характеристика, зоны квартиры, планеты, "
+                        "рекомендации по ремонту и фэншуй. 2-3 абзаца. Без воды."
+                    )},
+                    {"role": "user", "content": f"Материал про знак {sign}:\n\n{input_text}"}
+                ],
+                "max_tokens": 2048,
+                "temperature": 0.2,
+            }
+            resp = httpx.post(f"{api_url}/v1/chat/completions", json=prompt, timeout=300)
+            if resp.status_code == 200:
+                data = resp.json()
+                msg = data["choices"][0]["message"]
+                summary = (msg.get("content") or "").strip()
+                if not summary and msg.get("reasoning_content"):
+                    rc = msg["reasoning_content"]
+                    lines = [l.strip() for l in rc.split('\n') if l.strip()]
+                    summary = lines[-1].strip('"\'').replace('**', '') if lines else summary
+    except Exception:
+        pass
+
+    result_text = (
+        f"=== КРАТКОЕ РЕЗЮМЕ: {sign.upper()} ===\n\n"
+        f"{summary}\n\n"
+        f"=== ПОЛНЫЙ ТЕКСТ ===\n"
+        f"Файл: {fname}\n"
+        f"Чанков: {total_chunks} | Символов: {total_chars}\n"
+        f"Откройте DOCX в Word чтобы увидеть весь материал."
+    )
+
+    return [(result_text, total_chunks, sign, total_chars, 0, 0)]
+
+
+def search_filtered(hipporag, query, top_k=10, candidate_pool=200):
+    """
+    Small-to-big + RU-CE с фильтрацией по разделу знака зодиака.
+    Если запрос про Тельца — показываем ТОЛЬКО чанки из раздела Тельца.
+    """
+    chunk_store = hipporag.chunk_embedding_store
+    if len(chunk_store.embeddings) == 0:
+        return []
+
+    n_chunks = len(chunk_store.texts)
+    bm25 = _build_bm25(chunk_store)
+    terms, q_lower = split_query_terms(query)
+    if not terms:
+        terms = [w for w in query.lower().split() if len(w) > 2]
+
+    q_emb = hipporag.embedding_model.encode([query])
+    all_emb = np.array(chunk_store.embeddings)
+    emb_scores = np.dot(all_emb, q_emb.T).squeeze()
+
+    expanded_terms = _expand_query(q_lower, terms)
+    q_tokens = list(set(_tokenize(query) + expanded_terms))
+    bm25_scores = bm25.get_scores(q_tokens)
+
+    # BM25 candidates → фильтрация по разделу
+    candidate_idx = np.argsort(bm25_scores)[::-1][:candidate_pool]
+    candidate_idx = _filter_by_section(candidate_idx, chunk_store, q_lower)
+
+    if len(candidate_idx) == 0:
+        return []
+
+    scored = []
+    for idx in candidate_idx:
+        if idx >= n_chunks:
+            continue
+        text = chunk_store.texts[idx]
+        tl = text.lower()
+        emb = float(emb_scores[idx])
+        boost = _keyword_boost(tl, q_lower, terms)
+        sign_score = _chunk_sign_score(chunk_store, idx, q_lower)
+        boost += sign_score
+        final = emb * (1.0 + boost)
+        scored.append((idx, final, emb, float(bm25_scores[idx]), boost))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+
+    # RU Cross-encoder rerank top 30
+    try:
+        ce = _get_crossencoder_ru()
+        top_30 = scored[:30]
+        pairs = [(query, chunk_store.texts[idx][:512]) for idx, *_ in top_30]
+        xc_scores = ce.predict(pairs, show_progress_bar=False)
+        for i, (idx, final, emb, bm25_s, boost) in enumerate(top_30):
+            xc = float(xc_scores[i])
+            final = emb * 0.8 * (1.0 + boost) + xc * 0.2
+            scored[i] = (idx, final, emb, bm25_s, boost, xc)
+    except Exception:
+        pass
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+
+    # Small-to-big merging
+    used_ranges = set()
+    merged = []
+    for idx, final, emb, bm25_s, boost, *_ in scored:
+        source, page = _get_chunk_meta(chunk_store, idx)
+        if not source:
+            continue
+        window = set([idx])
+        for offset in range(-2, 3):
+            ni = idx + offset
+            if ni < 0 or ni >= n_chunks:
+                continue
+            ns, np_ = _get_chunk_meta(chunk_store, ni)
+            if ns == source and abs(np_ - page) <= 2:
+                window.add(ni)
+        pages = set()
+        for wi in window:
+            _, wp = _get_chunk_meta(chunk_store, wi)
+            pages.add(wp)
+        min_p, max_p = min(pages), max(pages)
+        rkey = f"{source}:{min_p}-{max_p}"
+        if rkey in used_ranges:
+            continue
+        used_ranges.add(rkey)
+        parts = [chunk_store.texts[wi] for wi in sorted(window)]
+        full_text = "\n\n".join(parts)
+
+        # Обрезка до заголовка знака
+        sign_in_result = _sign_in_query(q_lower)
+        if sign_in_result:
+            import re as _re
+            for form in ZODIAC_FORMS.get(sign_in_result, [sign_in_result]):
+                pattern = rf'(?:^|[.!\n])\s*{_re.escape(form.upper())}(?:\s|[:,.!])'
+                m = _re.search(pattern, full_text, _re.IGNORECASE)
+                if m:
+                    cut_pos = m.start()
+                    if cut_pos > 0:
+                        full_text = full_text[cut_pos:]
+                    full_text = full_text.lstrip(' .\n\t,;:!?')
+                    break
+
+        boost_final = _keyword_boost(full_text.lower(), q_lower, terms)
+        final_score = final * (1.0 + boost_final * 0.5)
+        merged.append((full_text, final_score, source, min_p, max_p, boost_final))
+        if len(merged) >= top_k:
+            break
+
+    # Дедупликация
+    seen_texts = set()
+    deduped = []
+    for text, score, source, min_p, max_p, boost in merged:
+        key = text[:200].lower()
+        if key in seen_texts:
+            continue
+        seen_texts.add(key)
+        deduped.append((text, score, source, min_p, max_p, boost))
+
+    deduped.sort(key=lambda x: x[1], reverse=True)
+    return deduped[:top_k]
+
+
+def search_hyde(hipporag, query, top_k=10, candidate_pool=200):
+    """
+    HyDE (Hypothetical Document Embedding).
+    1. LLM генерирует гипотетический документ (стиль книги Астрофэншуй)
+    2. Эмбеддинг запроса + эмбеддинг гипотетического документа
+    3. BM25 отбирает кандидатов
+    4. Multi-vector scoring + sign dominance
+    5. Русский Cross-encoder reranking
+    """
+    import httpx
+    api_url = LLM_BASE_URL.replace('/v1', '') if '/v1' in LLM_BASE_URL else LLM_BASE_URL
+
+    # Шаг 1: генерация гипотетического документа
+    hyde_text = None
+    try:
+        r_health = httpx.get(f"{api_url}/v1/models", timeout=3)
+        if r_health.status_code == 200:
+            hyde_prompt = {
+                "model": LLM_NAME,
+                "messages": [
+                    {"role": "system", "content": (
+                        "Ты — автор книги «Астрофэншуй квартиры». Напиши отрывок из книги, "
+                        "который отвечает на вопрос читателя. Используй стиль книги: "
+                        "астрологические термины, фэншуй, знаки зодиака, планеты, зоны квартиры. "
+                        "Напиши 3-5 предложений как в настоящей книге."
+                    )},
+                    {"role": "user", "content": f"Вопрос читателя: {query}"}
+                ],
+                "max_tokens": 1024,
+                "temperature": 0.3,
+            }
+            r = httpx.post(f"{api_url}/v1/chat/completions", json=hyde_prompt, timeout=300)
+            if r.status_code == 200:
+                data = r.json()
+                msg = data["choices"][0]["message"]
+                hyde_text = (msg.get("content") or "").strip()
+                if not hyde_text and msg.get("reasoning_content"):
+                    rc = msg["reasoning_content"]
+                    lines = [l.strip() for l in rc.split('\n') if l.strip()]
+                    hyde_text = lines[-1].strip('"\'').replace('**', '') if lines else None
+                if hyde_text and len(hyde_text) > 20:
+                    print(f"  📄 Гипотетический документ сгенерирован ({len(hyde_text)} симв.)")
+                else:
+                    hyde_text = None
+    except Exception:
+        pass
+
+    if not hyde_text:
+        print("  ⚠️ HyDE: LLM недоступен, работаю без гипотетического документа")
+        hyde_text = query
+
+    chunk_store = hipporag.chunk_embedding_store
+    if len(chunk_store.embeddings) == 0:
+        return []
+
+    n_chunks = len(chunk_store.texts)
+    bm25 = _build_bm25(chunk_store)
+    terms, q_lower = split_query_terms(query)
+    if not terms:
+        terms = [w for w in query.lower().split() if len(w) > 2]
+
+    # Эмбеддинг запроса и гипотетического документа
+    q_emb = hipporag.embedding_model.encode([query])
+    hyde_emb = hipporag.embedding_model.encode([hyde_text])
+    all_emb = np.array(chunk_store.embeddings)
+
+    query_scores = np.dot(all_emb, q_emb.T).squeeze()
+    hyde_scores = np.dot(all_emb, hyde_emb.T).squeeze()
+
+    # BM25 candidates
+    q_tokens = _tokenize(query)
+    bm25_scores = bm25.get_scores(q_tokens)
+    candidate_idx = np.argsort(bm25_scores)[::-1][:candidate_pool]
+
+    scored = []
+    for idx in candidate_idx:
+        if idx >= n_chunks:
+            continue
+        text = chunk_store.texts[idx]
+        tl = text.lower()
+        qs = float(query_scores[idx])
+        hs = float(hyde_scores[idx])
+        boost = _keyword_boost(tl, q_lower, terms)
+        sign_score = _chunk_sign_score(chunk_store, idx, q_lower)
+        boost += sign_score
+        # Комбинируем: query (40%) + hyde (40%) + keyword+sign (20%)
+        final = qs * 0.4 + hs * 0.4 + (qs + hs) * 0.5 * boost * 0.2
+        scored.append((text, final, qs, hs, boost))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+
+    # Rerank с русским CE
+    top_50 = scored[:50]
+    rest = scored[50:]
+    try:
+        ce = _get_crossencoder_ru()
+        pairs = [(query, c[0][:512]) for c in top_50]
+        xc_scores = ce.predict(pairs, show_progress_bar=False)
+        reranked = []
+        for i, c in enumerate(top_50):
+            xc = float(xc_scores[i])
+            text = c[0]
+            old = c[1]
+            boost = c[4]
+            final = old * 0.6 + xc * 0.4
+            reranked.append((text, final, xc, c[2], boost))
+        reranked.sort(key=lambda x: x[1], reverse=True)
+        scored = reranked + rest
+    except Exception:
+        pass
+
+    return scored[:top_k], hyde_text
+
+
+def show_results(query, results, mode_name, reformulated=None):
+    """Display search results with sentence-boundary detection."""
+    q_lower = query.lower()
+    print(f"\n{'=' * 80}")
+    print(f"[{mode_name}] Результаты: '{query}'")
+    if reformulated and reformulated != query:
+        label = "гипотетический документ" if mode_name == "HyDE" else "переформулировка"
+        print(f"  ({label}: '{reformulated[:120]}')")
+    print(f"{'=' * 80}")
+    if not results:
+        print("Ничего не найдено.")
+        return
+
+    is_full_material = mode_name in ("Весь знак", "Резюме", "Self-RAG")
+
+    for i, r in enumerate(results, 1):
+        is_selfrag = mode_name == "Self-RAG"
+        is_small_to_big = len(r) == 6 and isinstance(r[2], str) and not is_selfrag
+        if is_small_to_big:
+            doc, score, source, min_p, max_p, boost = r
+            extra = f" ({str(source)[:40]} стр.{min_p}-{max_p})"
+        else:
+            doc, score, dpr, multi, boost = r
+            extra = f" (dpr={dpr:.3f}, multi={multi:.3f})"
+
+        has_term = q_lower in doc.lower()
+        marker = " ✅" if has_term else ""
+
+        if is_full_material:
+            # Для полного материала: показываем резюме + путь к файлу
+            display = doc
+            # Если есть строка "Файл: " — выделяем её
+            if "Файл:" in doc:
+                for ln in doc.split('\n'):
+                    if ln.startswith('Файл:') or 'outputs/reports' in ln:
+                        display = display.replace(ln, f'\n>>> {ln} <<<')
+        else:
+            clean_doc, was_truncated = fix_chunk_start(doc)
+            display = show_text_safe(clean_doc)
+            if was_truncated:
+                display = "[...обрыв] " + display
+
+        print(f"\n--- {i}. (score: {score:.4f}, kw: +{boost:.2f}){extra}{marker} ---")
+        print(display)
+        print()
+
+
+MODEL_OPTIONS = {
+    '1': ('google/gemma-4-e4b', 'Gemma-4 ~9B активных (текущая)'),
+    '2': ('google/gemma-4-26b-a4b', 'Gemma-4 26B MoE ~4B активных, больше знаний'),
+    '3': ('qwen3.6-35b-a3b-claude-4.7-opus-reasoning-distilled@iq4_xs', 'Qwen3.6 35B MoE Claude-distilled, быстрый'),
+    '4': ('nvidia/nemotron-3-nano-4b', 'Nvidia Nemotron 4B, лёгкая и быстрая'),
+}
+
+
+def main():
+    print("=" * 80)
+    print("HIPPORAG - Поиск по базе знаний (астрофэншуй)")
+    print("=" * 80)
+
+    global LLM_NAME
+
+    print("\nВыберите модель для ответов:")
+    for k, v in MODEL_OPTIONS.items():
+        cur = " ← текущая" if v[0] == LLM_NAME else ""
+        print(f"  {k} — {v[1]}{cur}")
+    model_choice = input("Выбор [1-4], Enter для текущей: ").strip()
+    chosen_model = MODEL_OPTIONS.get(model_choice, (None, None))[0] or LLM_NAME
+    if chosen_model != LLM_NAME:
+        print(f"  → Переключаю API на: {chosen_model}")
+    else:
+        print(f"  → Модель: {chosen_model}")
+
+    config = BaseConfig(
+        save_dir=SAVE_DIR,
+        llm_name=LLM_NAME,
+        llm_base_url=LLM_BASE_URL,
+        embedding_model_name=EMBEDDING_MODEL,
+        linking_top_k=100, retrieval_top_k=200,
+        passage_node_weight=0.05, embedding_batch_size=8,
+    )
+
+    print("\nЗагрузка индекса...")
     hipporag = HippoRAG(global_config=config)
+    print("Готово!\n")
 
-    hipporag.index(docs)
+    if chosen_model != LLM_NAME:
+        LLM_NAME = chosen_model
 
-    # Retrieval and QA
-    hipporag.rag_qa(queries=all_queries, gold_docs=gold_docs, gold_answers=gold_answers)
+    while True:
+        print("-" * 80)
+        print("Режимы поиска:")
+        print("  1 — Multi-vector + LLM переформулировка ⭐")
+        print("  2 — Графовый (entity linking + PPR)")
+        print("  3 — BM25 + Embedding + CE (English)")
+        print("  4 — Small-to-big + CE (English)")
+        print("  5 — BM25 + RU-CE + Query expansion")
+        print("  6 — Small-to-big + RU-CE (русский)")
+        print("  7 — HyDE + RU-CE (гипотетический документ) ⭐")
+        print("  8 — Фильтр по разделу + RU-CE")
+        print("  9 — Весь материал по знаку зодиака (полностью)")
+        print("  10 — Весь материал + резюме LLM")
+        print("  11 — Весь материал + LLM обработка (стиль автора)")
+        print("  12 — Self-RAG (поиск + ответ LLM) ⭐")
+        print("  13 — RRF + контекстное окно + RU-CE")
+        print("  14 — E5 sentence-rerank")
+        print("  15 — RRF + контекст + sign dominance")
+        print("  16 — ColBERT-v2 late interaction")
+        print("  17 — Любой метод + LLM фильтрация")
+        print("  18 — Qwen3 + FRIDA + BM25 + LLM")
+        print("  19 — GraphRAG Agent (маршрутизация + самокоррекция) ⭐")
+        print("  20 — Sentence-level chunking (BM25 по предложениям) ⭐")
+        print("  21 — DAT Sentence-level + LLM (динамический α) ⭐")
+        print("  22 — Semantic filter + контекст (LLM-фильтрация) ⭐")
+        print("  23 — QA Cache (кэш ответов + автопоиск) ⭐")
+        print("  t — Тестирование всех методов по кэшу")
+        print("  e — Экспорт кэша в JSONL (для обучения)")
+        print("  q — Выход")
+        mode = input("Выбор [1-23/q/t/e]: ").strip().lower()
+        if mode == 'q':
+            break
+        if mode == 't':
+            q = input("Запрос для теста (Enter = из кэша): ").strip()
+            if not q:
+                cache = _qa_load()
+                if cache:
+                    q = cache[-1]["query"]
+                    print(f"  Беру последний из кэша: {q}")
+                else:
+                    print("  Кэш пуст.")
+                    continue
+            _qa_run_test(hipporag, q)
+            continue
+        if mode == 'e':
+            _qa_export_training()
+            continue
+        if mode not in ('1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23'):
+            continue
+
+        query = input("Запрос: ").strip()
+        if not query:
+            continue
+
+        reformulated = None
+        hyde_text = None
+        mode_map = {
+            '1': ('Multi-vector', lambda: search_multi_vector(hipporag, query), True),
+            '2': ('Граф', lambda: search_hipporag_graph(hipporag, query), False),
+            '3': ('BM25+CE-en', lambda: search_bm25_hybrid(hipporag, query), False),
+            '4': ('Small→Big-en', lambda: search_small_to_big(hipporag, query), False),
+            '5': ('BM25+CE-ru', lambda: search_bm25_hybrid_ru(hipporag, query), False),
+            '6': ('Small→Big-ru', lambda: search_small_to_big_ru(hipporag, query), False),
+            '7': ('HyDE', lambda: search_hyde(hipporag, query), True),
+            '8': ('Фильтр', lambda: search_filtered(hipporag, query), False),
+            '9': ('Весь знак', lambda: extract_sign_full(hipporag, query), False),
+            '10': ('Резюме', lambda: extract_sign_summary(hipporag, query), False),
+            '11': ('Обраб.', lambda: extract_sign_polished(hipporag, query), False),
+            '12': ('Self-RAG', lambda: search_self_rag(hipporag, query), False),
+            '13': ('RRF+Контекст', lambda: search_rrf_context(hipporag, query), False),
+            '14': ('E5-rerank', lambda: search_e5_rerank(hipporag, query), False),
+            '15': ('RRF+sign', lambda: search_mxbai(hipporag, query), False),
+            '16': ('ColBERT', lambda: search_colbert(hipporag, query), False),
+            '17': ('LLM-фильтр', lambda: search_with_llm_filter(hipporag, query), False),
+            '18': ('Qwen+FRIDA', lambda: search_qwen_frida(hipporag, query), False),
+            '19': ('GraphRAG', lambda: search_graphrag_agent(hipporag, query), False),
+            '20': ('Sentence-level', lambda: search_sentence_level(hipporag, query), False),
+            '21': ('DAT+LLM', lambda: search_dat_sentence_llm(hipporag, query), False),
+            '22': ('SemFilter', lambda: search_semantic_filter(hipporag, query), False),
+            '23': ('QACache', lambda: search_qa_cache(hipporag, query), False),
+        }
+        mode_name, search_fn, has_extra = mode_map[mode]
+        if has_extra:
+            result = search_fn()
+            if mode == '1':
+                results, reformulated = result
+            else:
+                results, hyde_text = result
+        else:
+            results = search_fn()
+
+        # Автосохранение в QA Cache
+        if results and mode not in ('23',):
+            try:
+                r0 = results[0]
+                txt = r0[0] if isinstance(r0, tuple) and len(r0) > 0 else str(r0)
+                short = ""
+                for line in txt.split('\n'):
+                    if 'ОТВЕТ:' in line:
+                        short = line.split('ОТВЕТ:')[1].strip()
+                        break
+                sources = [l.strip() for l in txt.split('\n') if 'Источник' in l[:20]]
+                _qa_store(query, txt, short, mode_name, int(mode), sources[:5])
+            except:
+                pass
+
+        show_results(query, results, mode_name, reformulated if reformulated else hyde_text)
+
+    print("\nДо свидания!")
+
+
+def search_semantic_filter(hipporag, query, top_k=50):
+    """
+    Метод 22: Поиск по паттерну ЗНАК — ЗОНА + планета-управитель.
+    1. Sentence-level search
+    2. Точный поиск конструкций «Знак — ... Зона» в тексте
+    3. Определение планеты-управителя знака
+    4. Все найденные соответствия — с цитатами и выводом
+    5. Если 0 — честно «не нашёл»
+    """
+    import time as _time
+    t0 = _time.time()
+    print(f"  Метод 22: Pattern Search (ЗНАК — ЗОНА)", flush=True)
+
+    SIGN_PLANET = {
+        'овен': 'Марс', 'телец': 'Венера', 'близнецы': 'Меркурий',
+        'рак': 'Луна', 'лев': 'Солнце', 'дева': 'Меркурий',
+        'весы': 'Венера', 'скорпион': 'Плутон', 'стрелец': 'Юпитер',
+        'козерог': 'Сатурн', 'водолей': 'Уран', 'рыбы': 'Нептун',
+    }
+
+    # Определяем целевую зону из запроса (по стемам)
+    ZONE_ALIASES = {
+        'плит': 'плита', 'плиту': 'плита',
+        'кладовк': 'кладовка', 'кладовку': 'кладовка',
+        'спальн': 'спальня', 'спальню': 'спальня',
+        'ванн': 'ванная', 'ванну': 'ванная',
+        'кухн': 'кухня', 'кухню': 'кухня',
+        'балкон': 'балкон',
+        'коридор': 'коридор',
+        'гостин': 'гостиная', 'гостиную': 'гостиная',
+        'прихож': 'прихожая', 'прихожую': 'прихожая',
+        'туалет': 'туалет',
+        'шкаф': 'шкаф',
+        'двер': 'дверь',
+    }
+    ql = query.lower()
+    target_zone = next((z for a, z in ZONE_ALIASES.items() if a in ql), None)
+    zone_stem = target_zone[:4] if target_zone else None
+    print(f"  Зона: {target_zone or 'не определена'}", flush=True)
+
+    results = search_sentence_level(hipporag, query, top_k=top_k)
+    if not results:
+        return [("Ответ не найден: поиск не дал результатов.", 0, 0, 0, 0)]
+    print(f"  Кандидатов: {len(results)}", flush=True)
+
+    # Ищем паттерн «ЗнаК — ... Зона» в каждом чанке
+    found = []
+    for r in results:
+        text = r[0] if isinstance(r, tuple) and len(r) > 0 else str(r)
+        tl = text.lower()
+        clean = tl.replace('\u2192', '').replace('\u2190', '')
+        src = r[2] if isinstance(r, tuple) and len(r) > 2 else ""
+        pg = r[3] if isinstance(r, tuple) and len(r) > 3 else 0
+
+        # Определяем классификацию
+        cls = 99
+        if 'светск' in tl or 'материальн' in tl:
+            cls = 0  # светская/материальная обитель
+        elif 'экзальтац' in tl:
+            cls = 1
+        elif 'падени' in tl:
+            cls = 2
+
+        for sign, planet in SIGN_PLANET.items():
+            if zone_stem:
+                pattern = rf'{sign}\s*[—\-]\s*[^.]{{0,150}}?{zone_stem}'
+            else:
+                pattern = rf'{sign}\s*[—\-]\s*[^.]{{5,150}}'
+            m = re.search(pattern, clean)
+            if m:
+                ctx_start = max(0, m.start() - 5)
+                ctx_end = min(len(clean), m.end() + 80)
+                while ctx_start > 0 and clean[ctx_start] not in '.!?\n':
+                    ctx_start -= 1
+                while ctx_end < len(clean) and clean[ctx_end] not in '.!?\n':
+                    ctx_end += 1
+                ctx = clean[ctx_start:ctx_end + 1].strip().lstrip('.!?\n').strip()
+                found.append({
+                    'sign': sign.capitalize(), 'planet': planet,
+                    'zone': target_zone or ctx.split('—')[-1].split(',')[0].strip(),
+                    'context': ctx[:200], 'source': src, 'page': pg, 'class': cls,
+                })
+                break
+
+    print(f"  Найдено соответствий: {len(found)}", flush=True)
+
+    if not found:
+        msg = f"Ответ не найден: в источниках нет соответствия для «{target_zone or query}»."
+        return [(msg, 0, 0, 0, 0)]
+
+    # Сортируем: приоритет классификации, потом по странице
+    found.sort(key=lambda f: (f['class'], f['page']))
+
+    # Берём только лучшее совпадение из каждой классификации
+    best_per_class = {}
+    for f in found:
+        if f['class'] not in best_per_class:
+            best_per_class[f['class']] = f
+
+    # Падежи: именительный → винительный (для «за»)
+    ACCUSATIVE = {
+        'плита': 'плиту', 'кладовка': 'кладовку', 'спальня': 'спальню',
+        'ванная': 'ванную', 'кухня': 'кухню', 'гостиная': 'гостиную',
+        'прихожая': 'прихожую', 'кладовая': 'кладовую',
+        'комната': 'комнату', 'терраса': 'террасу', 'лоджия': 'лоджию',
+        'дверь': 'дверь', 'квартира': 'квартиру',
+    }
+    zone_acc = ACCUSATIVE.get(target_zone, target_zone) if target_zone else target_zone
+
+    lines = [f"=== РЕЗУЛЬТАТ ПОИСКА ===",
+             f"Запрос: {query}",
+             f"Целевая зона: {target_zone or '?'}\n"]
+
+    if len(best_per_class) == 1:
+        f = list(best_per_class.values())[0]
+        lines.append(f"Найден 1 вариант в классификации «светская обитель»:\n")
+        lines.append(f"[Источник — {f['source']} стр.{f['page']}]")
+        lines.append(f"> {f['context'][:300]}")
+        lines.append(f"\nЗнак {f['sign']} → управитель {f['planet']}")
+        lines.append(f"ОТВЕТ: За зону {zone_acc} отвечает планета {f['planet']}.")
+    else:
+        lines.append("Найдено несколько вариантов в разных классификациях:\n")
+        primary = best_per_class.get(0)
+        if primary:
+            lines.append("--- Основная классификация (светская обитель) ---")
+            lines.append(f"[Источник — {primary['source']} стр.{primary['page']}]")
+            lines.append(f"> {primary['context'][:300]}")
+            lines.append(f"Знак {primary['sign']} → управитель {primary['planet']}")
+            lines.append(f"ОТВЕТ: {primary['planet']} отвечает за {zone_acc}.\n")
+        # Alternatives
+        lines.append("--- Другие классификации ---")
+        for cls, f in best_per_class.items():
+            if cls == 0:
+                continue
+            cls_name = ['светская', 'экзальтация', 'падение'][cls] if cls < 3 else f'тип {cls}'
+            lines.append(f"[{cls_name}] {f['sign']} → {f['planet']} ({f['source']} стр.{f['page']})")
+
+    lines.append(f"\nМетод: Pattern Search (программный, без LLM)")
+    t1 = _time.time()
+    print(f"  Готово за {t1-t0:.1f}с", flush=True)
+    return [("\n".join(lines), 999.0, 0, 0, 0)]
+
+
+# ═══════════════════════════════════════════════════════════════
+# QA Cache: база вопросов-ответов (кэш + тесты + обучение)
+# ═══════════════════════════════════════════════════════════════
+
+QA_CACHE_PATH = Path("outputs/qa_cache/qa_cache.json")
+
+def _qa_load():
+    if QA_CACHE_PATH.exists():
+        try:
+            with open(str(QA_CACHE_PATH), "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            pass
+    return []
+
+def _qa_save(cache):
+    QA_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(str(QA_CACHE_PATH), "w", encoding="utf-8") as f:
+        json.dump(cache, f, ensure_ascii=False, indent=2)
+
+def _qa_norm(q):
+    return re.sub(r'[^\w\s]', '', q.lower()).strip()
+
+def _qa_lookup(query, cache):
+    """Поиск похожего вопроса в кэше. Возвращает (entry, score) или None."""
+    qn = _qa_norm(query)
+    q_words = set(qn.split())
+    best = None
+    best_score = 0
+    for e in cache:
+        en = e.get("query_norm", "")
+        e_words = set(en.split())
+        if not q_words or not e_words:
+            continue
+        overlap = len(q_words & e_words) / max(len(q_words), len(e_words))
+        if overlap > best_score:
+            best_score = overlap
+            best = e
+    if best_score >= 0.7:
+        return best, best_score
+    return None, 0
+
+def _qa_store(query, answer, short_answer, method_name, method_id, sources, score=999.0):
+    """Сохранить результат в кэш."""
+    cache = _qa_load()
+    qn = _qa_norm(query)
+    # Не дублировать точные совпадения
+    for e in cache:
+        if e["query_norm"] == qn and e["method_id"] == method_id:
+            return
+    entry = {
+        "id": f"qa_{len(cache) + 1}",
+        "query": query,
+        "query_norm": qn,
+        "answer": answer if answer else "",
+        "short_answer": short_answer[:200] if short_answer else "",
+        "method": method_name,
+        "method_id": method_id,
+        "model": LLM_NAME,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "sources": sources[:10] if sources else [],
+        "score": score,
+    }
+    cache.append(entry)
+    _qa_save(cache)
+    print(f"  Сохранено в QA Cache (#{len(cache)})", flush=True)
+
+def _qa_export_training(output_path="outputs/qa_cache/training_data.jsonl"):
+    """Экспорт кэша в JSONL для fine-tuning."""
+    cache = _qa_load()
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(str(out), "w", encoding="utf-8") as f:
+        for e in cache:
+            line = json.dumps({
+                "instruction": e["query"],
+                "output": e["short_answer"] or e["answer"][:500],
+                "sources": e["sources"],
+                "method": e["method"],
+            }, ensure_ascii=False)
+            f.write(line + "\n")
+    print(f"  Экспортировано {len(cache)} записей в {out}", flush=True)
+
+def _qa_run_test(hipporag, query):
+    """Запустить все методы и сравнить с кэшем."""
+    from main import (
+        search_multi_vector, search_hipporag_graph, search_bm25_hybrid,
+        search_small_to_big, search_bm25_hybrid_ru, search_small_to_big_ru,
+        search_hyde, search_filtered, search_rrf_context, search_e5_rerank,
+        search_mxbai, search_colbert, search_self_rag, search_sentence_level,
+        search_dat_sentence_llm, search_semantic_filter,
+    )
+    test_methods = [
+        (6, "Small→Big-ru", lambda: search_small_to_big_ru(hipporag, query)),
+        (12, "Self-RAG", lambda: search_self_rag(hipporag, query)),
+        (20, "Sentence", lambda: search_sentence_level(hipporag, query)),
+        (21, "DAT+LLM", lambda: search_dat_sentence_llm(hipporag, query)),
+        (22, "Pattern", lambda: search_semantic_filter(hipporag, query)),
+    ]
+    cache = _qa_load()
+    cached, _ = _qa_lookup(query, cache)
+    print(f"\n{'='*60}")
+    print(f"ТЕСТИРОВАНИЕ ВСЕХ МЕТОДОВ")
+    print(f"Запрос: {query}")
+    if cached:
+        print(f"Ожидаемый ответ: {cached.get('short_answer', '')[:100]}")
+    print(f"{'='*60}\n")
+    print(f"{'Метод':<15} {'Ответ (первые 80)':<80} {'Совпадение':<10}")
+    print("-" * 105)
+    for mid, mname, mfunc in test_methods:
+        try:
+            res = mfunc()
+            txt = ""
+            if res:
+                r = res[0]
+                txt = r[0] if isinstance(r, tuple) and len(r) > 0 else str(r)
+            short = txt[:80].replace('\n', ' ').strip()
+            match = "✓" if cached and cached.get("short_answer", "") in txt else "?"
+            print(f"{mname:<15} {short:<80} {match:<10}")
+        except Exception as e:
+            print(f"{mname:<15} {'ERROR: ' + str(e)[:60]:<80} {'':<10}")
+
+def search_qa_cache(hipporag, query, top_k=10):
+    """
+    Метод 23: QA Cache — поиск по базе готовых ответов.
+    Если вопрос уже задавался — возвращает кэшированный ответ.
+    Если нет — запускает метод 22, сохраняет результат, возвращает.
+    """
+    import time as _time
+    t0 = _time.time()
+    print(f"  Метод 23: QA Cache", flush=True)
+    cache = _qa_load()
+    cached, score = _qa_lookup(query, cache)
+    if cached:
+        print(f"  Найден в кэше (совпадение: {score:.0%})", flush=True)
+        short = cached.get("short_answer", "")
+        full = cached.get("answer", "")
+        result = (
+            f"=== ОТВЕТ ИЗ КЭША ===\n"
+            f"Запрос: {query}\n"
+            f"Совпадение: {score:.0%}\n\n"
+            f"ОТВЕТ: {short or 'не указан'}\n\n"
+            f"--- Полный ответ ---\n"
+            f"{full}\n\n"
+            f"Сохранён: {cached['timestamp']} | Метод: {cached['method']} | Модель: {cached['model']}"
+        )
+        return [(result, 999.0, 0, 0, 0)]
+    # Не найдено → запускаем метод 22, сохраняем
+    print(f"  Не найден в кэше, запускаю метод 22...", flush=True)
+    res22 = search_semantic_filter(hipporag, query, top_k=50)
+    if res22 and len(res22) > 0:
+        txt = res22[0][0] if isinstance(res22[0], tuple) else str(res22[0])
+        # Извлекаем короткий ответ
+        short = ""
+        for line in txt.split('\n'):
+            if 'ОТВЕТ:' in line:
+                short = line.split('ОТВЕТ:')[1].strip()
+                break
+        sources = []
+        for line in txt.split('\n'):
+            if line.startswith('[Источник'):
+                sources.append(line.strip())
+        _qa_store(query, txt, short, "QACache+Pattern", 23, sources, 999.0)
+        return res22
+    return [("Не удалось получить ответ.", 0, 0, 0, 0)]
+
 
 if __name__ == "__main__":
     main()
