@@ -4,7 +4,8 @@ import numpy as np
 
 from hipporag.utils.misc_utils import min_max_normalize
 
-from ..config import LLM_BASE_URL, LLM_NAME
+from .. import config
+from ..config import LLM_BASE_URL
 from ..query import _expand_query, split_query_terms
 from ..signs import _chunk_sign_score, _keyword_boost, _sign_in_query
 from .bm25_hybrid import search_bm25_hybrid_ru, search_rrf_context
@@ -150,7 +151,7 @@ def search_graphrag_agent(hipporag, query):
             r = httpx.get(f"{api_url}/v1/models", timeout=3)
             if r.status_code == 200:
                 prompt = {
-                    "model": LLM_NAME,
+                    "model": config.LLM_NAME,
                     "messages": [
                         {
                             "role": "system",
@@ -198,7 +199,7 @@ def search_graphrag_agent(hipporag, query):
             r = httpx.get(f"{api_url}/v1/models", timeout=3)
             if r.status_code == 200:
                 prompt = {
-                    "model": LLM_NAME,
+                    "model": config.LLM_NAME,
                     "messages": [
                         {
                             "role": "system",

@@ -2,7 +2,8 @@
 
 import numpy as np
 
-from ..config import LLM_BASE_URL, LLM_NAME
+from .. import config
+from ..config import LLM_BASE_URL
 from ..primitives import _build_bm25
 from ..query import split_query_terms
 from ..rerankers import _get_crossencoder_ru
@@ -29,7 +30,7 @@ def search_hyde(hipporag, query, top_k=10, candidate_pool=200):
         r_health = httpx.get(f"{api_url}/v1/models", timeout=3)
         if r_health.status_code == 200:
             hyde_prompt = {
-                "model": LLM_NAME,
+                "model": config.LLM_NAME,
                 "messages": [
                     {
                         "role": "system",

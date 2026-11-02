@@ -2,7 +2,8 @@
 
 import re
 
-from ..config import LLM_BASE_URL, LLM_NAME
+from .. import config
+from ..config import LLM_BASE_URL
 from ..primitives import _get_chunk_meta
 from ..query import _SIGN_RE, ZODIAC_FORMS, ZODIAC_SIGNS, _word_re
 from ..signs import (
@@ -182,7 +183,7 @@ def extract_sign_polished(hipporag, query):
             for i, part in enumerate(text_parts):
                 print(f"     Часть {i+1}/{len(text_parts)}...", end="", flush=True)
                 prompt = {
-                    "model": LLM_NAME,
+                    "model": config.LLM_NAME,
                     "messages": [
                         {
                             "role": "system",
@@ -339,7 +340,7 @@ def extract_sign_summary(hipporag, query):
         r = httpx.get(f"{api_url}/v1/models", timeout=3)
         if r.status_code == 200:
             prompt = {
-                "model": LLM_NAME,
+                "model": config.LLM_NAME,
                 "messages": [
                     {
                         "role": "system",

@@ -5,7 +5,8 @@ import re
 import numpy as np
 from rank_bm25 import BM25Okapi
 
-from ..config import LLM_BASE_URL, LLM_NAME
+from .. import config
+from ..config import LLM_BASE_URL
 from ..primitives import _get_chunk_meta
 from ..query import _expand_query, split_query_terms
 from ..signs import _chunk_sign_score, _keyword_boost
@@ -111,7 +112,7 @@ def _dat_evaluate(query, sent_top1, dense_top1):
             r = httpx.post(
                 f"{api_url}/v1/chat/completions",
                 json={
-                    "model": LLM_NAME,
+                    "model": config.LLM_NAME,
                     "messages": [{"role": "user", "content": prompt_text}],
                     "max_tokens": 50,
                     "temperature": 0.1,
@@ -226,7 +227,7 @@ def search_dat_sentence_llm(hipporag, query, top_k=10):
         chunks_text += f"\n[Источник {i} - {src} стр.{pg}]\n{text[:1500]}\n"
     answer = None
     prompt_base = {
-        "model": LLM_NAME,
+        "model": config.LLM_NAME,
         "messages": [
             {
                 "role": "system",
@@ -260,7 +261,7 @@ def search_dat_sentence_llm(hipporag, query, top_k=10):
     prompts_to_try = [
         prompt_base,
         {
-            "model": LLM_NAME,
+            "model": config.LLM_NAME,
             "messages": [
                 {"role": "user", "content": f"Вопрос: {query}\n\nИсточники:\n{chunks_text}"}
             ],
@@ -268,7 +269,7 @@ def search_dat_sentence_llm(hipporag, query, top_k=10):
             "temperature": 0.1,
         },
         {
-            "model": LLM_NAME,
+            "model": config.LLM_NAME,
             "messages": [{"role": "user", "content": f"{query}\n\n{chunks_text[:500]}"}],
             "max_tokens": 512,
             "temperature": 0.1,

@@ -2,7 +2,7 @@
 
 Перенос из main.py (шаг 4 миграции MAIN_SPLIT_PLAN.md) — тела функций извлечены
 байт-в-байт (417-662); изменена только секция импортов:
-SYNONYM_MAP -> load_synonyms() из .synonyms (данные пакета), STOP_WORDS/LLM_NAME
+SYNONYM_MAP -> load_synonyms() из .synonyms (данные пакета), STOP_WORDS/config.LLM_NAME
 -> .config.
 """
 
@@ -10,7 +10,8 @@ import re
 
 import httpx
 
-from .config import LLM_BASE_URL, LLM_NAME, STOP_WORDS
+from . import config
+from .config import LLM_BASE_URL, STOP_WORDS
 from .synonyms import load_synonyms
 
 SYNONYM_MAP = load_synonyms()
@@ -195,7 +196,7 @@ def reformulate_query(hipporag, query):
     # Прямой вызов LM Studio API (chat completions)
     try:
         payload = {
-            "model": LLM_NAME,
+            "model": config.LLM_NAME,
             "messages": [
                 {
                     "role": "system",

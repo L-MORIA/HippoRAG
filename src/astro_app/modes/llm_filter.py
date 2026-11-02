@@ -2,7 +2,8 @@
 
 import numpy as np
 
-from ..config import LLM_BASE_URL, LLM_NAME
+from .. import config
+from ..config import LLM_BASE_URL
 from ..primitives import _build_bm25, _get_chunk_meta
 from ..query import _expand_query, split_query_terms
 from ..signs import _chunk_sign_score, _count_sign, _keyword_boost, _sign_in_query
@@ -63,7 +64,7 @@ def _llm_filter_results(query, results, max_results=5):
         candidates.append({"id": i, "source": str(source), "text": text})
 
     prompt = {
-        "model": LLM_NAME,
+        "model": config.LLM_NAME,
         "messages": [
             {
                 "role": "system",

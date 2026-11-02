@@ -2,7 +2,8 @@
 
 import numpy as np
 
-from ..config import LLM_BASE_URL, LLM_NAME
+from .. import config
+from ..config import LLM_BASE_URL
 from ..primitives import _build_bm25, _embedding_scores, _get_chunk_meta
 from ..query import _expand_query, split_query_terms
 from ..signs import _chunk_sign_score, _keyword_boost
@@ -97,7 +98,7 @@ def search_self_rag(hipporag, query, top_k=30, candidate_pool=200):
         r_health = httpx.get(f"{api_url}/v1/models", timeout=3)
         if r_health.status_code == 200:
             prompt = {
-                "model": LLM_NAME,
+                "model": config.LLM_NAME,
                 "messages": [
                     {
                         "role": "system",
