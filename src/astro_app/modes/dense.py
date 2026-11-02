@@ -4,7 +4,7 @@ import numpy as np
 
 from ..primitives import _build_bm25, _get_chunk_meta
 from ..query import _expand_query, reformulate_query, split_query_terms
-from ..rerankers import _get_e5
+from ..rerankers import _colbert_encode, _colbert_score, _get_colbert, _get_e5
 from ..signs import _chunk_sign_score, _keyword_boost
 from ..textutils import _tokenize
 
@@ -275,6 +275,111 @@ def search_e5_rerank(hipporag, query, top_k=10, candidate_pool=200):
         boost_final = _keyword_boost(full_text.lower(), q_lower, terms)
         final_score = emb_sim * (1.0 + boost_final) + sent_score * 0.3
         merged.append((full_text, final_score, source, min_p, max_p, boost_final))
+        if len(merged) >= top_k:
+            break
+
+    merged.sort(key=lambda x: x[1], reverse=True)
+    return merged[:top_k]
+
+
+def search_colbert(hipporag, query, top_k=10, candidate_pool=200):
+    """
+    Поиск: RRF (BM25 + эмбеддинги) → ColBERT-v2 late interaction reranking.
+    Токен-уровневый поиск: каждый токен запроса сравнивается с каждым токеном чанка.
+    Медленнее, но точнее для сложных cross-chunk запросов.
+    """
+    import time as _time
+
+    chunk_store = hipporag.chunk_embedding_store
+    if len(chunk_store.embeddings) == 0:
+        return []
+    n_chunks = len(chunk_store.texts)
+    bm25 = _build_bm25(chunk_store)
+    terms, q_lower = split_query_terms(query)
+    if not terms:
+        terms = [w for w in query.lower().split() if len(w) > 2]
+    exp = _expand_query(q_lower, terms)
+    q_tokens = list(set(_tokenize(query) + exp))
+    bm25_scores = bm25.get_scores(q_tokens)
+
+    q_emb = hipporag.embedding_model.encode([query])
+    all_emb = np.array(chunk_store.embeddings)
+    emb_scores = np.dot(all_emb, q_emb.T).squeeze()
+
+    bm25_r = np.argsort(bm25_scores)[::-1]
+    emb_r = np.argsort(emb_scores)[::-1]
+    bm25_p = {idx: p for p, idx in enumerate(bm25_r)}
+    emb_p = {idx: p for p, idx in enumerate(emb_r)}
+    k = 60
+    rrf = [1 / (k + bm25_p.get(i, 1e6)) + 1 / (k + emb_p.get(i, 1e6)) for i in range(n_chunks)]
+    candidates = np.argsort(rrf)[::-1][:candidate_pool]
+    if len(candidates) == 0:
+        return []
+
+    _get_colbert()
+    print("  🧠 ColBERT late interaction (30 candidates)...", flush=True)
+    t0 = _time.time()
+    q_ce, q_cm = _colbert_encode(query)
+
+    top30 = candidates[:30]
+    rest = candidates[30:]
+
+    scored = []
+    for pos, idx in enumerate(top30):
+        t1 = _time.time()
+        d_ce, d_cm = _colbert_encode(chunk_store.texts[idx][:512])
+        col_score = _colbert_score(q_ce, q_cm, d_ce, d_cm)
+        dt = _time.time() - t1
+        tl = chunk_store.texts[idx].lower()
+        boost = _keyword_boost(tl, q_lower, terms)
+        sign_score = _chunk_sign_score(chunk_store, idx, q_lower)
+        boost += sign_score
+        # ColBERT (70%) + embedding (30%), boost применяется к ColBERT
+        final = col_score * 0.7 * (1.0 + boost * 0.5) + float(emb_scores[idx]) * 0.3
+        scored.append((idx, final, float(emb_scores[idx]), col_score, boost))
+        if pos < 3 or pos == len(top30) - 1:
+            print(f"     [{pos+1}/30] score={col_score:.4f} ({dt:.1f}s)", flush=True)
+
+    for idx in rest:
+        tl = chunk_store.texts[idx].lower()
+        boost = _keyword_boost(tl, q_lower, terms)
+        sign_score = _chunk_sign_score(chunk_store, idx, q_lower)
+        boost += sign_score
+        final = float(emb_scores[idx]) * (1.0 + boost)
+        scored.append((idx, final, float(emb_scores[idx]), 0, boost))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    print(f"  ✅ ColBERT: {_time.time()-t0:.0f} сек total", flush=True)
+
+    # Контекстное окно ±1
+    used = set()
+    merged = []
+    for idx, final, emb_sim, col_s, boost in scored:
+        source, page = _get_chunk_meta(chunk_store, idx)
+        if not source:
+            continue
+        w = set([idx])
+        for off in range(-1, 2):
+            ni = idx + off
+            if ni < 0 or ni >= n_chunks:
+                continue
+            ns, np_ = _get_chunk_meta(chunk_store, ni)
+            if ns == source and abs(np_ - page) <= 1:
+                w.add(ni)
+        pages = set()
+        for wi in w:
+            _, wp = _get_chunk_meta(chunk_store, wi)
+            pages.add(wp)
+        mp, xp = min(pages), max(pages)
+        rk = f"{source}:{mp}-{xp}"
+        if rk in used:
+            continue
+        used.add(rk)
+        parts = [chunk_store.texts[wi] for wi in sorted(w)]
+        ft = "\n\n".join(parts)
+        bf = _keyword_boost(ft.lower(), q_lower, terms)
+        fs = emb_sim * (1.0 + bf) + max(col_s, 0) * 0.3
+        merged.append((ft, fs, source, mp, xp, bf))
         if len(merged) >= top_k:
             break
 
