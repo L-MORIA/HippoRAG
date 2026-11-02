@@ -1,6 +1,5 @@
-"""Режимы hyde — перенос из main.py (шаг 6, байт-в-байт)."""
+"""Режимы hyde — перенос из main.py (шаг 6, AST-извлечение из git HEAD)."""
 
-import httpx
 import numpy as np
 
 from ..config import LLM_BASE_URL, LLM_NAME
@@ -20,6 +19,7 @@ def search_hyde(hipporag, query, top_k=10, candidate_pool=200):
     4. Multi-vector scoring + sign dominance
     5. Русский Cross-encoder reranking
     """
+    import httpx
 
     api_url = LLM_BASE_URL.replace("/v1", "") if "/v1" in LLM_BASE_URL else LLM_BASE_URL
 

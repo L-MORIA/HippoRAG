@@ -54,7 +54,8 @@ def test_sentence_level_delegates_bibliographic_query(monkeypatch):
         calls["top_k"] = top_k
         return sentinel
 
-    monkeypatch.setattr(main, "search_bm25_hybrid_ru", fake_chunk_level)
+    # делегация переехала в astro_app.modes.sentence_dat (шаг 7 MAIN_SPLIT_PLAN.md)
+    monkeypatch.setattr("astro_app.modes.sentence_dat.search_bm25_hybrid_ru", fake_chunk_level)
 
     # hipporag намеренно пустой: при раннем возврате он не должен понадобиться.
     result = main.search_sentence_level(object(), "какие книги написала Максимова?", top_k=7)

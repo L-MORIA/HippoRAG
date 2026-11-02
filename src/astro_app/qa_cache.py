@@ -13,7 +13,7 @@ import re
 import time
 from pathlib import Path
 
-from .config import LLM_NAME
+from . import config
 
 QA_CACHE_PATH = Path("outputs/qa_cache/qa_cache.json")
 
@@ -31,7 +31,7 @@ def _qa_is_current(entry):
     if entry.get("schema_version") != QA_CACHE_VERSION:
         return False
     model = entry.get("model")
-    if model and model != LLM_NAME:
+    if model and model != config.LLM_NAME:
         return False
     return True
 
@@ -117,7 +117,7 @@ def _qa_store(query, answer, short_answer, method_name, method_id, sources, scor
         "short_answer": short_answer[:200] if short_answer else "",
         "method": method_name,
         "method_id": method_id,
-        "model": LLM_NAME,
+        "model": config.LLM_NAME,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "sources": sources[:10] if sources else [],
         "score": score,

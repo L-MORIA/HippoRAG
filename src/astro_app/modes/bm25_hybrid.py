@@ -1,4 +1,4 @@
-"""Режимы bm25_hybrid — перенос из main.py (шаг 6, байт-в-байт)."""
+"""Режимы bm25_hybrid — перенос из main.py (шаг 6, AST-извлечение из git HEAD)."""
 
 import numpy as np
 

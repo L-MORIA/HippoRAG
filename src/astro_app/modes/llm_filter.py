@@ -1,6 +1,5 @@
-"""Режимы llm_filter — перенос из main.py (шаг 6, байт-в-байт)."""
+"""Режимы llm_filter — перенос из main.py (шаг 6, AST-извлечение из git HEAD)."""
 
-import httpx
 import numpy as np
 
 from ..config import LLM_BASE_URL, LLM_NAME
@@ -42,6 +41,8 @@ def _llm_filter_results(query, results, max_results=5):
     Отправляет топ-10 результатов в LLM, просит отобрать релевантные.
     """
     import json as _json
+
+    import httpx
 
     api_url = LLM_BASE_URL.replace("/v1", "") if "/v1" in LLM_BASE_URL else LLM_BASE_URL
     try:
@@ -121,6 +122,12 @@ def search_with_llm_filter(hipporag, query):
     filtered = _llm_filter_results(query, results, max_results=5)
     print(f"  ✅ После фильтра: {len(filtered)} результатов", flush=True)
     return filtered if filtered else results[:3]
+
+
+_QWEN_MODEL = None
+
+
+_FRIDA_MODEL = None
 
 
 def _get_qwen():

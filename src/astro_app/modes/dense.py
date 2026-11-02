@@ -1,4 +1,4 @@
-"""Режимы dense — перенос из main.py (шаг 6, байт-в-байт)."""
+"""Режимы dense — перенос из main.py (шаг 6, AST-извлечение из git HEAD)."""
 
 import numpy as np
 

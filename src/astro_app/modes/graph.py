@@ -1,6 +1,5 @@
-"""Режимы graph — перенос из main.py (шаг 6, байт-в-байт)."""
+"""Режимы graph — перенос из main.py (шаг 6, AST-извлечение из git HEAD)."""
 
-import httpx
 import numpy as np
 
 from hipporag.utils.misc_utils import min_max_normalize
@@ -78,6 +77,8 @@ def search_graphrag_agent(hipporag, query):
     при необходимости переформулирует и пробует снова.
     """
     import time as _time
+
+    import httpx
 
     api_url = LLM_BASE_URL.replace("/v1", "") if "/v1" in LLM_BASE_URL else LLM_BASE_URL
     terms, q_lower = split_query_terms(query)

@@ -13,11 +13,10 @@ import pytest
 
 @pytest.fixture
 def cache_path(tmp_path, monkeypatch):
-    import main
 
     path = tmp_path / "qa_cache.json"
-    monkeypatch.setattr(main, "QA_CACHE_PATH", path)
-    monkeypatch.setattr(main, "LLM_NAME", "test-model")
+    monkeypatch.setattr("astro_app.qa_cache.QA_CACHE_PATH", path)
+    monkeypatch.setattr("astro_app.config.LLM_NAME", "test-model")
     return path
 
 
@@ -101,7 +100,7 @@ def test_search_qa_cache_does_not_return_stale_answer(cache_path, monkeypatch):
     def fake_semfilter(hipporag, query, top_k=50):
         return [("=== РЕЗУЛЬТАТ ПОИСКА ===\nОТВЕТ: свежий ответ.", 999.0, 0, 0, 0)]
 
-    monkeypatch.setattr(main, "search_semantic_filter", fake_semfilter)
+    monkeypatch.setattr("astro_app.modes.qacache.search_semantic_filter", fake_semfilter)
 
     result = main.search_qa_cache(object(), "какая зона у овна?")
     text = result[0][0]
@@ -118,7 +117,7 @@ def test_refusal_is_not_cached(cache_path, monkeypatch):
     def fake_semfilter(hipporag, query, top_k=50):
         return [("Ответ не найден: в источниках нет соответствия.", 0, 0, 0, 0)]
 
-    monkeypatch.setattr(main, "search_semantic_filter", fake_semfilter)
+    monkeypatch.setattr("astro_app.modes.qacache.search_semantic_filter", fake_semfilter)
 
     main.search_qa_cache(object(), "какие книги написала Максимова?")
 

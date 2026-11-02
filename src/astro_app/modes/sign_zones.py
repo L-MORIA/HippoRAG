@@ -1,98 +1,43 @@
-"""Режимы sign_zones — перенос из main.py (шаг 6, байт-в-байт)."""
+"""Режимы sign_zones — перенос из main.py (шаг 6, AST-извлечение из git HEAD)."""
 
 import re
 
-import httpx
-
 from ..config import LLM_BASE_URL, LLM_NAME
 from ..primitives import _get_chunk_meta
-from ..query import (
-    _SIGN_RE,
-    ZODIAC_FORMS,
-    ZODIAC_SIGNS,
-    _word_re,
+from ..query import _SIGN_RE, ZODIAC_FORMS, ZODIAC_SIGNS, _word_re
+from ..signs import (
+    _ACCUSATIVE,
+    _CLASS_NAMES,
+    _SIGN_ZONE_STRONG,
+    _SIGN_ZONE_WEAK,
+    _ZONE_TEXT_STEMS,
+    SIGN_PLANET,
+    ZONE_ALIASES,
+    _count_sign,
+    _sign_in_query,
 )
-from ..signs import _count_sign, _sign_in_query
-
-SIGN_PLANET = {
-    "овен": "Марс",
-    "телец": "Венера",
-    "близнецы": "Меркурий",
-    "рак": "Луна",
-    "лев": "Солнце",
-    "дева": "Меркурий",
-    "весы": "Венера",
-    "скорпион": "Плутон",
-    "стрелец": "Юпитер",
-    "козерог": "Сатурн",
-    "водолей": "Уран",
-    "рыбы": "Нептун",
-}
-
-
-ZONE_ALIASES = {
-    "плит": "плита",
-    "плиту": "плита",
-    "кладовк": "кладовка",
-    "кладовку": "кладовка",
-    "спальн": "спальня",
-    "спальню": "спальня",
-    "ванн": "ванная",
-    "ванну": "ванная",
-    "кухн": "кухня",
-    "кухню": "кухня",
-    "балкон": "балкон",
-    "коридор": "коридор",
-    "гостин": "гостиная",
-    "гостиную": "гостиная",
-    "прихож": "прихожая",
-    "прихожую": "прихожая",
-    "туалет": "туалет",
-    "шкаф": "шкаф",
-    "двер": "дверь",
-}
-
-
-_ZONE_TEXT_STEMS = {
-    **ZONE_ALIASES,
-    "холл": "прихожая",
-    "лоджи": "балкон",
-    "террас": "балкон",
-    "гардероб": "кладовка",
-    "кладовая": "кладовка",
-}
-
-
-_SIGN_ZONE_STRONG = ("обител", "соответству", "точка силы", "приписыва")
-
-
-_SIGN_ZONE_WEAK = ("экзальтац", "изгнан", "падени", "управител", "зона")
-
-
-_CLASS_NAMES = {0: "светская обитель", 1: "экзальтация", 2: "изгнание/падение"}
-
-
-_ACCUSATIVE = {
-    "плита": "плиту",
-    "кладовка": "кладовку",
-    "спальня": "спальню",
-    "ванная": "ванную",
-    "кухня": "кухню",
-    "гостиная": "гостиную",
-    "прихожая": "прихожую",
-    "кладовая": "кладовую",
-    "комната": "комнату",
-    "терраса": "террасу",
-    "лоджия": "лоджию",
-    "дверь": "дверь",
-    "квартира": "квартиру",
-}
-
 
 _SENTENCE_INDEX = None
 
 
 _SENTENCE_INDEX_KEY = None
+
+
+def _sentence_index(chunk_store):
+    """Кэш предложений корпуса: [(lower, original, chunk_idx)]."""
+    global _SENTENCE_INDEX, _SENTENCE_INDEX_KEY
+    key = (id(chunk_store), len(chunk_store.texts))
+    if _SENTENCE_INDEX is not None and _SENTENCE_INDEX_KEY == key:
+        return _SENTENCE_INDEX
+    sentences = []
+    for idx, text in enumerate(chunk_store.texts):
+        for sentence in re.split(r"(?<=[.!?])\s+", str(text)):
+            sentence = sentence.strip()
+            if len(sentence) > 15:
+                sentences.append((sentence.lower(), sentence, idx))
+    _SENTENCE_INDEX = sentences
+    _SENTENCE_INDEX_KEY = key
+    return sentences
 
 
 def extract_sign_full(hipporag, query):
@@ -190,6 +135,7 @@ def extract_sign_polished(hipporag, query):
     """
     from pathlib import Path
 
+    import httpx
     from docx import Document
     from docx.shared import Pt
 
@@ -331,6 +277,7 @@ def extract_sign_summary(hipporag, query):
     """
     from pathlib import Path
 
+    import httpx
     from docx import Document
     from docx.shared import Pt
 
@@ -429,23 +376,6 @@ def extract_sign_summary(hipporag, query):
     )
 
     return [(result_text, total_chunks, sign, total_chars, 0, 0)]
-
-
-def _sentence_index(chunk_store):
-    """Кэш предложений корпуса: [(lower, original, chunk_idx)]."""
-    global _SENTENCE_INDEX, _SENTENCE_INDEX_KEY
-    key = (id(chunk_store), len(chunk_store.texts))
-    if _SENTENCE_INDEX is not None and _SENTENCE_INDEX_KEY == key:
-        return _SENTENCE_INDEX
-    sentences = []
-    for idx, text in enumerate(chunk_store.texts):
-        for sentence in re.split(r"(?<=[.!?])\s+", str(text)):
-            sentence = sentence.strip()
-            if len(sentence) > 15:
-                sentences.append((sentence.lower(), sentence, idx))
-    _SENTENCE_INDEX = sentences
-    _SENTENCE_INDEX_KEY = key
-    return sentences
 
 
 def _zones_in_text(text_lower):

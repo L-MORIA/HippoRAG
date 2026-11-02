@@ -29,16 +29,14 @@ def fake_pipeline(monkeypatch):
 
     # Router для «какие книги…» уходит в ветку is_global → rrf + small-to-big.
     monkeypatch.setattr(
-        main,
-        "search_rrf_context",
+        "astro_app.modes.graph.search_rrf_context",
         lambda hipporag, q, **kw: [
             _row("Максимова Ирина Валериевна Психологический фэншуй"),
             _row("Астрофэншуй квартиры издание второе"),
         ],
     )
     monkeypatch.setattr(
-        main,
-        "search_small_to_big_ru",
+        "astro_app.modes.graph.search_small_to_big_ru",
         lambda hipporag, q, **kw: [_row("Эзотерический фэншуй переиздание")],
     )
 
@@ -79,10 +77,12 @@ def test_graphrag_agent_falls_back_to_search_results(monkeypatch):
     import main
 
     monkeypatch.setattr(
-        main, "search_rrf_context", lambda hipporag, q, **kw: [_row("фрагмент корпуса")]
+        "astro_app.modes.graph.search_rrf_context",
+        lambda hipporag, q, **kw: [_row("фрагмент корпуса")],
     )
     monkeypatch.setattr(
-        main, "search_small_to_big_ru", lambda hipporag, q, **kw: [_row("другой фрагмент")]
+        "astro_app.modes.graph.search_small_to_big_ru",
+        lambda hipporag, q, **kw: [_row("другой фрагмент")],
     )
     monkeypatch.setattr("httpx.get", lambda url, timeout=3: FakeResponse({"data": []}))
     monkeypatch.setattr(

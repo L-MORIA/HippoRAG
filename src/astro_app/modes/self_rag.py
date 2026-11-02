@@ -1,6 +1,5 @@
-"""Режимы self_rag — перенос из main.py (шаг 6, байт-в-байт)."""
+"""Режимы self_rag — перенос из main.py (шаг 6, AST-извлечение из git HEAD)."""
 
-import httpx
 import numpy as np
 
 from ..config import LLM_BASE_URL, LLM_NAME
@@ -20,6 +19,7 @@ def search_self_rag(hipporag, query, top_k=30, candidate_pool=200):
     Теперь кандидаты — объединение BM25-топа и dense-топа, а ранжирование
     считается по RRF: при отсутствии эмбеддингов поведение остаётся прежним.
     """
+    import httpx
 
     api_url = LLM_BASE_URL.replace("/v1", "") if "/v1" in LLM_BASE_URL else LLM_BASE_URL
     _, q_lower = split_query_terms(query)

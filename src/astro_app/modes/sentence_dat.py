@@ -1,8 +1,7 @@
-"""Режимы sentence_dat — перенос из main.py (шаг 6, байт-в-байт)."""
+"""Режимы sentence_dat — перенос из main.py (шаг 6, AST-извлечение из git HEAD)."""
 
 import re
 
-import httpx
 import numpy as np
 from rank_bm25 import BM25Okapi
 
@@ -25,12 +24,6 @@ BIBLIO_QUERY_PATTERNS = (
     r"издани[еяй]\s+книг",
     r"какая\s+книга",
 )
-
-
-def _is_bibliographic_query(query):
-    """Вопрос про книги/автора/издания, а не про содержание (P1-7)."""
-    ql = query.lower()
-    return any(re.search(pattern, ql) for pattern in BIBLIO_QUERY_PATTERNS)
 
 
 def _is_bibliographic_query(query):
@@ -96,6 +89,7 @@ def search_sentence_level(hipporag, query, top_k=10):
 
 
 def _dat_evaluate(query, sent_top1, dense_top1):
+    import httpx
 
     api_url = LLM_BASE_URL.replace("/v1", "") if "/v1" in LLM_BASE_URL else LLM_BASE_URL
     if not sent_top1 or not dense_top1:
@@ -194,6 +188,8 @@ def _dat_combine_results(sentence_results, dense_results, alpha, top_k=15):
 
 def search_dat_sentence_llm(hipporag, query, top_k=10):
     import time as _time
+
+    import httpx
 
     api_url = LLM_BASE_URL.replace("/v1", "") if "/v1" in LLM_BASE_URL else LLM_BASE_URL
     t0 = _time.time()

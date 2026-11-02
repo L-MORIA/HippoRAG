@@ -1,8 +1,4 @@
-"""Режим 23: QA Cache — перенос из main.py (шаг 6).
-
-Импортирует режим 22 (.sign_zones) и подсистему кэша (.qa_cache) — без цикла:
-sign_zones тянет только .qa_cache, а этот модуль — оба.
-"""
+"""Режимы qacache — перенос из main.py (шаг 6, AST-извлечение из git HEAD)."""
 
 from ..qa_cache import _qa_derive_short, _qa_load, _qa_lookup, _qa_store
 from .sign_zones import search_semantic_filter
