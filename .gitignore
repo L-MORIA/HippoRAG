@@ -16,8 +16,11 @@ __pycache__/
 nohup_out/
 # Ignore outputs directory
 outputs/
-# Ignore data directory
-data/
+# Ignore data directory (ТОЛЬКО корень репозитория).
+# Без ведущего слэша паттерн игнорировал бы любой каталог data/ на любой
+# глубине — включая src/astro_app/data/, где лежит пакетный synonyms.json
+# (в чистом клоне падал ModuleNotFoundError: No module named 'astro_app.data').
+/data/
 # Ignore the bash script to clear files under outputs and logs directories
 clear_outputs_and_logs.sh
 # Ignore the env file
