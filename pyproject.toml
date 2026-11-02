@@ -94,6 +94,9 @@ Documentation = "https://hipporag.readthedocs.io"
 Repository = "https://github.com/OSU-NLP-Group/HippoRAG.git"
 Issues = "https://github.com/OSU-NLP-Group/HippoRAG/issues"
 
+[tool.setuptools.package-data]
+astro_app = ["data/*.json"]
+
 [tool.ruff]
 target-version = "py310"
 # tests/standalone — ручные сценарии, не библиотечный код; archive — неактивные материалы
