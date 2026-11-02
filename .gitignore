@@ -37,3 +37,9 @@ temp_uploads/
 tmp_*.py
 tmp_*.json
 tmp_*.txt
+
+# Артефакты сборки пакета
+build/
+dist/
+*.egg-info/
+*.whl
