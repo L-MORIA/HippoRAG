@@ -19,8 +19,10 @@ def show_results(query, results, mode_name, reformulated=None):
     is_full_material = mode_name in ("Весь знак", "Резюме", "Self-RAG")
 
     for i, r in enumerate(results, 1):
-        is_selfrag = mode_name == "Self-RAG"
-        is_small_to_big = len(r) == 6 and isinstance(r[2], str) and not is_selfrag
+        # Self-RAG и Small→Big возвращают одну форму: (doc, score, источник,
+        # стр.мин, стр.макс, буст) — исключение Self-RAG здесь ломало дисплей
+        # режима 12 (ValueError на реальной выдаче).
+        is_small_to_big = len(r) == 6 and isinstance(r[2], str)
         if is_small_to_big:
             doc, score, source, min_p, max_p, boost = r
             extra = f" ({str(source)[:40]} стр.{min_p}-{max_p})"
