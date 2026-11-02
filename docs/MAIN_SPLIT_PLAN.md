@@ -1,16 +1,18 @@
 # План разделения main.py на модули
 
 **Дата:** 2026-11-02
-**Статус:** план (развилка №5 сводного аудита — активирована владельцем) **— на рецензии, 3 правки до начала работ**
+**Статус:** v2 — правки по рецензии [`MAIN_SPLIT_PLAN_REVIEW.md`](./MAIN_SPLIT_PLAN_REVIEW.md) внесены, готов к выполнению
 **Объект:** `main.py` — 4070 строк, 72 функции, 23 режима поиска + QA-кэш + меню
 
-> ⚠️ **Рецензия:** [`MAIN_SPLIT_PLAN_REVIEW.md`](./MAIN_SPLIT_PLAN_REVIEW.md).
-> Два блокирующих замечания и одно существенное:
-> 1. пакет должен лежать в `src/astro_search/` — иначе не попадёт ни в editable-установку, ни в wheel (проверено: wheel содержит только `hipporag`; `.pth` добавляет в `sys.path` только `src`);
-> 2. `data/synonyms.json` попадает под `.gitignore` (`data/`) → словарь не уедет в репозиторий → тихое деградирование keyword-expansion во всех режимах;
-> 3. единая сигнатура `fn(hipporag, query, top_k=10)` не соответствует коду: 5 функций `top_k` не принимают, у `search_self_rag` дефолт 30, у `search_semantic_filter` — 50.
+> **Журнал правок по рецензии** (все три утверждения рецензии проверены исполнителем независимо — AST-разбор, `git check-ignore`, содержимое `__editable__.hipporag-2.0.0a4.pth` — и подтверждены):
 >
-> После этих трёх правок план можно выполнять.
+> | № | Возражение | Правка в v2 |
+> |---|-----------|-------------|
+> | 1 (блок.) | пакет в корне не попадает в editable-установку и wheel (`.pth` добавляет только `src/`; auto-discovery src-layout) | пакет перенесён в **`src/astro_app/`** (§2) |
+> | 2 (блок.) | `data/synonyms.json` под `.gitignore` (`data/`) → тихое деградирование keyword-expansion во всех 23 режимах на свежем клоне | словарь внутри пакета: **`src/astro_app/data/synonyms.json`** + `[tool.setuptools.package-data]` (§2, §4.1) |
+> | 3 (сущ.) | единая сигнатура `fn(hipporag, query, top_k=10)`: 5 функций `top_k` не принимают (partial → TypeError), у `search_self_rag` дефолт 30, у `search_semantic_filter` — 50 (тихая урезка выдачи) | контракт вызова **`fn(hipporag, query)`** — дефолты функций сохраняются; `top_k` — поле реестра, передаётся только если задано; для 5 функций — адаптеры (§4) |
+> | 4 | оценка 1,5–2 дня занижена (полный smoke 23 режимов ≈ 12–20 мин × 7 шагов) | smoke **только по затронутым режимам** на каждом шаге, полный снапшот — на базлайне и финале; оценка **3–5 дней** (§5) |
+> | 5 | имя `astro_search` вводит в заблуждение (внутри ещё QA-кэш и CLI) | пакет переименован в **`astro_app`**; если владельцу милее прежнее имя — переименование на шаге 7 без функциональных последствий |
 
 ---
 
@@ -18,27 +20,38 @@
 
 1. **main.py становится тонкой точкой входа** (~50 строк): парсинг аргументов + вызов меню.
 2. **Единый реестр режимов** вместо `if mode == "1" ... elif mode == "23"`: декларативная таблица
-   `MODES: dict[str, ModeSpec]`, где `ModeSpec = (название, функция, флаги «специализированный»/«⭐»)`.
-   Меню рисуется из реестра — добавление режима = одна запись, а не правка в 4 местах.
-3. **Единая сигнатура режима**: `fn(hipporag, query, top_k=10) -> list[Result]`. Режимы, которым
-   нужны нестандартные параметры, оборачиваются `functools.partial`.
-4. **Ленивая загрузка тяжёлых моделей сохраняется** (сейчас `lru_cache`-синглтоны `_get_crossencoder`,
+   `MODES: dict[str, ModeSpec]`. Меню рисуется из реестра — добавление режима = одна запись,
+   а не правка в 4 местах (меню, `_qa_run_test`, «тестирование всех методов», документация).
+3. **Контракт вызова режима — `fn(hipporag, query)`**: каждый режим сохраняет СВОИ дефолты
+   (включая `top_k=30` у Self-RAG и `top_k=50` у semantic filter). Реестр передаёт `top_k`
+   только если он явно указан в `ModeSpec` (§4). Возражение 3 рецензии закрыто конструкцией,
+   а не осторожностью.
+4. **Ленивая загрузка тяжёлых моделей сохраняется** (`lru_cache`-синглтоны `_get_crossencoder`,
    `_get_e5`, `_get_colbert`, `_get_qwen`…) — переезжают в свои модули без изменений логики.
 5. **Каждый шаг миграции = отдельный коммит + зелёные проверки** (`pytest tests/unit` — 110,
-   py_compile, ruff, black/isort, smoke-прогон меню). Сломанный промежуточный коммит недопустим.
+   py_compile, ruff, black/isort, smoke по затронутым режимам). Сломанный промежуточный
+   коммит недопустим.
 6. Импорты в стиле `from hipporag import ...` (единый namespace, S-13).
+7. **Measure-first:** любое проектное решение в этом плане снабжено измерением
+   (пакет/установка — §2 и приложение рецензии; gitignore — `git check-ignore`;
+   сигнатуры — AST-разбор). Новые решения перед внесением в план проверяются так же.
 
 ## 2. Целевая структура
 
 ```
-main.py                      # ~50 строк: точка входа → astro_search.cli.main()
+main.py                      # ~50 строк: точка входа → astro_app.cli.main()
 
-astro_search/
-  __init__.py                # реэкспорт MODES и run()
-  config.py                  # константы (SAVE_DIR, LLM_*, пути), STOP_WORDS,
-                             # SENTENCE_START, load_hipporag(),初始化 env
-  synonyms.py                # SYNONYM_MAP → перенос в данные (data/synonyms.json)
-                             # + функция load_synonyms() (словарь — данные, не код)
+src/astro_app/               # пакет внутри src/ — попадает в editable-установку
+  __init__.py                #    И В wheel (auto-discovery src-layout подхватит
+  config.py                  #    hipporag И astro_app); Возражение 1 закрыто
+                             # константы (SAVE_DIR, LLM_*, пути), STOP_WORDS,
+                             # SENTENCE_START, load_hipporag(), инициализация env
+  data/
+    synonyms.json            # SYNONYM_MAP как данные ВНУТРИ пакета (Возражение 2):
+                             # попадает в git, wheel и sdist; не конфликтует с
+                             # data/ корпуса (та остаётся в .gitignore)
+  synonyms.py                # load_synonyms(): читает data/synonyms.json
+                             # через importlib.resources — работает и из wheel
   query.py                   # _expand_query, _word_re, _is_meta_reformulation,
                              # reformulate_query, split_query_terms                (строки 417–695)
   textutils.py               # show_text_safe, fix_chunk_start, _tokenize          (665–695, 819–833)
@@ -48,7 +61,7 @@ astro_search/
   display.py                 # show_results                                        (3287–3344)
   qa_cache.py                # _qa_load/_qa_save/_qa_lookup/_qa_store/_qa_norm/
                              # _qa_derive_short/_qa_run_test/_qa_export_training   (3846–4070)
-  modes/                     # 23 режима — по группам, сигнатура fn(hipporag, query, top_k)
+  modes/                     # 23 режима — по группам, контракт fn(hipporag, query)
     __init__.py              # сборка реестра MODES из подмодулей
     dense.py                 # search_multi_vector, search_mxbai, search_e5_rerank      (697–762, 925–1011, 1023–1142)
     bm25_hybrid.py           # search_bm25_hybrid(_ru), search_rrf_context              (1167–1324)
@@ -70,59 +83,91 @@ astro_search/
                              # search_semantic_filter                                   (2709–3046, 3598–3845)
     filtered.py              # search_filtered                                          (3047–3168)
   cli.py                     # main(): меню из реестра MODES, обработка t/e/q,
-                             # show_results,цикл ввода                                  (3345–3597)
+                             # show_results, цикл ввода                                 (3345–3597)
 ```
 
 Ссылки на строки — по текущему файлу (4070 строк); при миграции «плывут» на ±10 строк.
+
+**Сопровождающая правка `pyproject.toml`** (иначе данные не попадут в дистрибутив —
+смежная с Возражением 2 дыра, закрытая проактивно):
+
+```toml
+[tool.setuptools.package-data]
+astro_app = ["data/*.json"]
+```
 
 ## 3. Порядок миграции (7 шагов, каждый = коммит + зелёные проверки)
 
 | Шаг | Что переезжает | Почему первым/в таком порядке |
 |-----|----------------|-------------------------------|
-| 1 | `synonyms.py` (+SYNONYM_MAP в `data/synonyms.json`) | Нет зависимостей; самая «мясистая» константа (~100 строк) уходит из кода в данные |
+| 1 | Каркас `src/astro_app/` + `config.py` + `synonyms.{py,json}` (+ package-data в pyproject) | Фундамент и данные; сразу фиксирует правила упаковки, чтобы дальнейшие шаги не приходилось переделывать |
 | 2 | `textutils.py` + `display.py` | Утилиты без зависимостей от режимов |
 | 3 | `qa_cache.py` | Самодостаточная подсистема (кэш/экспорт), используется меню t/e |
-| 4 | `config.py` + `query.py` + `primitives.py` | Общий фундамент для всех режимов |
+| 4 | `query.py` + `primitives.py` | Общий фундамент для всех режимов |
 | 5 | `rerankers.py` | Тяжёлые ленивые синглтоны в одном месте; режимы начнут импортировать отсюда |
-| 6 | `modes/*` — **группами** (dense → bm25 → graph → small_to_big → llm_filter → sentence_dat → self_rag/hyde → sign_zones → filtered), после каждой группы: smoke-запуск затронутых режимов из меню | Режимы зависят только от primitives/rerankers — мигрируют независимо |
-| 7 | `cli.py` + новый `main.py` + реестр `MODES` | Последним: меню переключается на реестр, старый if/elif удаляется |
+| 6 | `modes/*` — **группами** (dense → bm25 → graph → small_to_big → llm_filter → sentence_dat → self_rag/hyde → sign_zones → filtered), после каждой группы: smoke **только затронутых режимов** | Режимы зависят только от primitives/rerankers — мигрируют независимо |
+| 7 | `cli.py` + новый `main.py` + реестр `MODES` + **полный снапшот-сравнение 23 режимов** | Последним: меню переключается на реестр, старый if/elif удаляется |
 
 ## 4. Реестр режимов (шаг 7)
 
 ```python
-# astro_search/modes/__init__.py
+# src/astro_app/modes/__init__.py
 from dataclasses import dataclass
 from typing import Callable
 
 @dataclass(frozen=True)
 class ModeSpec:
-    label: str          # «Dense (multi-vector)»
-    fn: Callable        # fn(hipporag, query, top_k=10) -> list
-    star: bool = False  # ⭐ рекомендованный
-    special: str = ""   # предупреждение («нужен знак или зона в запросе»)
+    label: str
+    fn: Callable            # вызывается как fn(hipporag, query) — СВОИ дефолты каждого режима
+    star: bool = False      # ⭐ рекомендованный
+    special: str = ""       # предупреждение («нужен знак или зона в запросе»)
+    top_k: int | None = None  # None → НЕ передавать, работает дефолт функции
+                              # (search_self_rag=30, search_semantic_filter=50 — сохраняются)
 
 MODES: dict[str, ModeSpec] = {
-    "1": ModeSpec("…", dense.search_multi_vector),
+    "1": ModeSpec("Dense (multi-vector)", dense.search_multi_vector),
     ...
+    "14": ModeSpec("Self-RAG", self_rag.search_self_rag, top_k=30),  # фиксируем текущий дефолт явно
     "22": ModeSpec("Pattern Search: знак ↔ зона", sign_zones.search_semantic_filter,
-                   special="нужен знак или зона в запросе, иначе честный отказ"),
+                   special="нужен знак или зона в запросе, иначе честный отказ", top_k=50),
 }
 ```
 
-- Меню печатает таблицу из `MODES` (номер, label, ⭐/⚠) — правка «пометить режим 22/23 специализированным»
-  (коммит 086daf1) превращается в поле `special`.
-- `_qa_run_test` «Тестирование всех методов» проходит по `MODES` —oday дублирующий список исчезает.
-- Нестандартные сигнатуры (например, режимы со `candidate_pool`) — `partial(fn, candidate_pool=300)`.
+Правила вызова в `cli.py` (единственные допустимые формы):
 
-## 5. Приёмка (после каждого шага и финально)
+```python
+spec = MODES[mode]
+results = spec.fn(hipporag, query) if spec.top_k is None else spec.fn(hipporag, query, top_k=spec.top_k)
+```
 
-1. `python -m pytest tests/unit` — 110 passed (рост покрытия по мере выноса модулей — добавить импорт-тесты реестра).
-2. `python -m compileall .` + ruff/black/isort — как в CI.
-3. Smoke-меню: интерактивный запуск, поочерёдный прогон всех 23 режимов на контрольном запросе
-   («как обустроить прихожую для Овна») — сравнение выдачи с до-рефакторным снапшотом
-   (зафиксировать снапшот выдачи ДО начала работ: `python main.py` → режимы 1–23 → JSON в `outputs/refactor_baseline/`).
-4. Точки входа не меняются: `hipporag.bat`, `menu.py`, `test_menu.bat` продолжают работать
-   (main.py сохраняет CLI-контракт).
+**Адаптеры для 5 функций без `top_k`** (AST-проверено: `search_with_llm_filter`,
+`search_graphrag_agent`, `extract_sign_full`, `extract_sign_polished`,
+`extract_sign_summary` — принимают только `(hipporag, query)`; `partial` с `top_k`
+дал бы TypeError):
+
+```python
+def _mode_graphrag(h, q):        # тонкие адаптеры рядом с функциями в их модулях
+    return search_graphrag_agent(h, q)
+```
+
+- Меню печатает таблицу из `MODES` (номер, label, ⭐/⚠) — правка «пометить режим 22/23
+  специализированным» (коммит 086daf1) превращается в поле `special`.
+- `_qa_run_test` «Тестирование всех методов» проходит по `MODES` — дублирующий список исчезает.
+- Дополнительные параметры, которые функция РЕАЛЬНО принимает (например, `candidate_pool`
+  у режимов dense/bm25), — `functools.partial` допустим: он передаёт то, что есть в сигнатуре.
+
+## 5. Приёмка
+
+1. **Базлайн ДО первого шага:** снапшот выдачи всех 23 режимов на контрольном запросе
+   («как обустроить прихожую для Овна») → `outputs/refactor_baseline/` (JSON: режим → docs/citations).
+2. **После каждого шага:** `pytest tests/unit` (110), `compileall`, ruff/black/isort (как в CI),
+   smoke **затронутых** режимов шага со сравнением с базлайном (измеренная стоимость:
+   extract_sign_polished ≈ 2 мин, search_qwen_frida ≈ 2 мин, LLM-режимы 10–42 с).
+3. **Финал (шаг 7):** полный снапшот 23 режимов и сравнение с базлайном.
+4. **Упаковка:** `pip wheel . --no-deps` → в wheel присутствует `astro_app` + `data/synonyms.json`
+   (проверка Возражений 1–2 на артефактах, не на веру).
+5. Точки входа не меняются: `hipporag.bat`, `menu.py`, `test_menu.bat` продолжают работать;
+   импорт `astro_app` работает из любого cwd (editable-установка уже прописывает `src/`).
 
 ## 6. Риски
 
@@ -130,7 +175,10 @@ MODES: dict[str, ModeSpec] = {
 |------|-----------|
 | Лямбды/замыкания в меню теряют контекст при переносе | Режимы — функции верхнего уровня, а не лямбды (заодно закрывает B023-класс) |
 | Дублирование констант при миграции группами | Константы только в `config.py`; каждый шаг — grep на остатки в main.py |
-| Случайное изменение поведения поиска | Снапшот выдачи (§5.3) до старта и после каждого шага |
+| Случайное изменение поведения поиска | Снапшот-базлайн (§5.1) и сравнение после каждого шага (§5.2) |
+| Данные вне пакета / под gitignore | Словарь внутри `src/astro_app/data/` + package-data; проверка wheel на артефакте (§5.4) |
+| Сигнатурные несовместимости режимов | Контракт `fn(hipporag, query)` + `top_k` в реестре + адаптеры; AST-сверка сигнатур на шаге 6 |
 | Батч-правка «всё сразу» | Строго по шагам 1–7, один шаг = один коммит |
 
-**Оценка:** 1,5–2 рабочих дня (включая снапшот-базлайн и smoke-прогоны).
+**Оценка:** 3–5 рабочих дней (smoke по затронутым режимам на каждом шаге, полный снапшот
+на базлайне и финале; измерения длительности режимов — из рецензии, §4.1).
