@@ -14,10 +14,7 @@ def test_all_is_assigned_once():
         node
         for node in tree.body
         if isinstance(node, ast.Assign)
-        and any(
-            isinstance(target, ast.Name) and target.id == "__all__"
-            for target in node.targets
-        )
+        and any(isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets)
     ]
     assert len(assignments) == 1
 
