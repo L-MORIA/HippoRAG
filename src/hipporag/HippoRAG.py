@@ -136,6 +136,10 @@ class HippoRAG:
             logger.info(f"Creating working directory: {self.working_dir}")
             os.makedirs(self.working_dir, exist_ok=True)
 
+        # Путь к графу нужен до загрузки: по нему проверяется формат индекса (H0-8).
+        self._graph_pickle_filename = os.path.join(self.working_dir, "graph.pickle")
+        self.index_status = self._check_index_contract()
+
         self.llm_model: BaseLLM = _get_llm_class(self.global_config)
 
         if self.global_config.openie_mode == "online":
@@ -197,6 +201,22 @@ class HippoRAG:
 
         self.ent_node_to_chunk_ids = None
 
+    def _check_index_contract(self):
+        """Сверить формат индекса на диске с ожидаемым (H0-8).
+
+        Проверка выполняется при загрузке индекса, то есть на старте любого
+        сценария (CLI, скрипты, API): несовместимый формат должен давать явное
+        предупреждение, а не тихую деградацию результатов. Индекс, собранный до
+        H0-8, манифеста не имеет — это тоже предупреждение, а не ошибка:
+        работа продолжается.
+        """
+        from astro_app.versions import check_index
+
+        status = check_index(self.working_dir, graph_path=self._graph_pickle_filename)
+        if status.is_problem:
+            logger.warning(status.message)
+        return status
+
     def initialize_graph(self):
         """
         Initializes a graph using a Pickle file if available or creates a new graph.
@@ -212,8 +232,6 @@ class HippoRAG:
         Raises:
             None
         """
-        self._graph_pickle_filename = os.path.join(self.working_dir, "graph.pickle")
-
         preloaded_graph = None
 
         if not self.global_config.force_index_from_scratch:
@@ -1358,7 +1376,44 @@ class HippoRAG:
             f"Writing graph with {len(self.graph.vs())} nodes, {len(self.graph.es())} edges"
         )
         self.graph.write_pickle(self._graph_pickle_filename)
+        self._write_index_manifest()
         logger.info("Saving graph completed!")
+
+    def _write_index_manifest(self):
+        """Записать манифест формата индекса рядом с graph.pickle (H0-8).
+
+        Манифест фиксирует версию формата на момент сборки индекса: при загрузке
+        HippoRAG сравнивает её с версией кода и предупреждает о несовпадении.
+        Счётчики — только диагностика, поэтому их сбой не должен ломать
+        сохранение индекса.
+        """
+        from astro_app.versions import INDEX_FORMAT_VERSION, write_index_manifest
+
+        counts = {"nodes": len(self.graph.vs()), "edges": len(self.graph.es())}
+        for name, attribute in (
+            ("chunks", "chunk_embedding_store"),
+            ("entities", "entity_embedding_store"),
+            ("facts", "fact_embedding_store"),
+        ):
+            store = getattr(self, attribute, None)
+            if store is None:
+                continue
+            try:
+                counts[name] = len(store.get_all_ids())
+            except Exception as error:  # noqa: BLE001 — счётчик не влияет на контракт
+                logger.debug(f"Не удалось посчитать {name}: {error}")
+
+        try:
+            path = write_index_manifest(
+                self.working_dir,
+                llm_name=self.global_config.llm_name,
+                embedding_model=self.global_config.embedding_model_name,
+                counts=counts,
+            )
+        except OSError as error:
+            logger.warning(f"Не удалось записать манифест индекса: {error}")
+            return
+        logger.info(f"Манифест индекса записан (формат {INDEX_FORMAT_VERSION}): {path}")
 
     def get_graph_info(self) -> Dict:
         """

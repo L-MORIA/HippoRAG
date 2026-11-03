@@ -73,6 +73,12 @@ Search existing open and closed issues first — someone else may already be wor
 - The LLM is picked from `.env` (`LLM_NAME`, `LLM_BASE_URL`) — by default LM Studio with `gemma-4-e4b`
 - LLM responses are cached in SQLite: `<save_dir>/llm_cache/<model>_cache.sqlite`
 - Run `python main.py` to start the interactive menu with all 23 methods
+- Format versions live in one place: `src/astro_app/versions.py`. When you change the
+  index layout, the QA-cache record shape, or the bundled data format, bump the
+  corresponding version there. The index version is written to
+  `index_manifest.json` on save and checked on load; bundled data is verified
+  against `src/astro_app/data/data_manifest.json` (regenerate it with
+  `python scripts/update_package_data_manifest.py`)
 
 ---
 

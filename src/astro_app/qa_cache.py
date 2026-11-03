@@ -14,14 +14,21 @@ import time
 from pathlib import Path
 
 from . import config
+from .versions import QA_CACHE_VERSION  # noqa: F401 — реэкспорт: main.py импортирует отсюда
 
 QA_CACHE_PATH = Path("outputs/qa_cache/qa_cache.json")
 
-# Версия формата записи и логики ответа (P1-9). Кэш переживал правки кода:
-# записи, сохранённые до фиксов, отдавались как «кэшированный ответ», то есть
-# неверный ответ под видом кэша. Увеличивайте версию при изменении формата
-# ответа/промптов — старые записи перестанут читаться и будут пересчитаны.
-QA_CACHE_VERSION = 2
+# Версия формата записи и логики ответа объявлена в astro_app/versions.py (H0-8):
+# версия живёт в одном месте вместе с INDEX_FORMAT_VERSION и PACKAGE_DATA_VERSION.
+# Кэш переживал правки кода: записи, сохранённые до фиксов, отдавались как
+# «кэшированный ответ», то есть неверный ответ под видом кэша. Увеличивайте
+# версию при изменении формата ответа/промптов — старые записи перестанут
+# читаться и будут пересчитаны.
+
+#: О каких файлах кэша уже предупредили: (путь, mtime_ns, размер). По ключу
+#: видно, что файл не менялся, — иначе предупреждение печаталось бы на каждый
+#: поиск, пока кэш не перезапишется.
+_WARNED_STALE: set[tuple[str, int, int]] = set()
 
 
 def _qa_is_current(entry):
@@ -42,10 +49,60 @@ def _qa_load():
             with open(str(QA_CACHE_PATH), "r", encoding="utf-8") as f:
                 cache = json.load(f)
             if isinstance(cache, list):
-                return [entry for entry in cache if _qa_is_current(entry)]
+                current = [entry for entry in cache if _qa_is_current(entry)]
+                dropped = len(cache) - len(current)
+                if dropped:
+                    _warn_stale_entries(cache, dropped)
+                return current
         except Exception:
             pass
     return []
+
+
+def _warn_stale_entries(cache, dropped: int) -> None:
+    """Явно сказать, что часть кэша не прочитана и будет пересчитана (H0-8).
+
+    Раньше устаревшие записи отбрасывались молча: пользователь видел «свежий»
+    ответ и не знал, что кэш наполовину недействителен.
+    """
+    try:
+        stat = QA_CACHE_PATH.stat()
+        key = (str(QA_CACHE_PATH), stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        key = (str(QA_CACHE_PATH), 0, 0)
+    if key in _WARNED_STALE:
+        return
+    _WARNED_STALE.add(key)
+
+    versions_seen = sorted(
+        {
+            repr(entry.get("schema_version"))
+            for entry in cache
+            if isinstance(entry, dict) and entry.get("schema_version") != QA_CACHE_VERSION
+        }
+    )
+    models = sorted(
+        {
+            str(entry.get("model"))
+            for entry in cache
+            if isinstance(entry, dict)
+            and entry.get("model")
+            and entry.get("model") != config.LLM_NAME
+        }
+    )
+
+    details = []
+    if versions_seen:
+        details.append(f"schema_version {', '.join(versions_seen)} вместо {QA_CACHE_VERSION}")
+    if models:
+        details.append(f"модель {', '.join(models)} вместо {config.LLM_NAME}")
+    reason = f" ({'; '.join(details)})" if details else ""
+
+    print(
+        f"  QA-кэш: {dropped} из {len(cache)} записей не прочитаны{reason} — "
+        f"они будут пересчитаны при повторном вопросе",
+        flush=True,
+    )
 
 
 def _qa_save(cache):
