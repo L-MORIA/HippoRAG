@@ -66,6 +66,12 @@ class HealthResponse(BaseModel):
     uptime: str = Field(..., description="Время работы сервиса")
     chunks: int = Field(default=0, description="Количество чанков в индексе")
     facts: int = Field(default=0, description="Количество фактов в индексе")
+    auth_required: bool = Field(
+        default=True, description="Требуется ли заголовок X-API-Key для запросов"
+    )
+    auth_failures: int = Field(
+        default=0, description="Счётчик отказов авторизации с момента запуска"
+    )
     timestamp: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc), description="Текущее время"
     )

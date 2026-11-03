@@ -7,8 +7,13 @@
 import io
 import json
 import logging
+import os
 import sys
 from pathlib import Path
+
+# Локальная приёмка без ключа: сервер поднимается в режиме fail-open.
+# В проде ключ обязателен (API_KEY_REQUIRED=1 по умолчанию).
+os.environ.setdefault("API_KEY_REQUIRED", "0")
 
 INDEX_DIR = Path(
     "outputs/astrology_test/gemma-4-e4b_sentence-transformers_paraphrase-multilingual-mpnet-base-v2"
