@@ -1,5 +1,6 @@
 import logging
 import os
+import secrets
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -97,13 +98,16 @@ async def api_key_guard(request: Request, call_next):
     получил CORS-метаданные и мог отправить сам запрос (D2).
     """
     if API_KEY and request.method != "OPTIONS":
-        import secrets
-
-        provided = request.headers.get("X-API-Key", "")
-        if not secrets.compare_digest(provided, API_KEY):
+        provided = request.headers.get("X-API-Key", "").encode("utf-8")
+        if not secrets.compare_digest(provided, API_KEY.encode("utf-8")):
             return JSONResponse(
                 status_code=401,
                 content={"status": "error", "error": "Требуется заголовок X-API-Key"},
+                headers={
+                    "Access-Control-Allow-Origin": "http://localhost:3000",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key",
+                    "Access-Control-Allow-Credentials": "true",
+                },
             )
     return await call_next(request)
 
