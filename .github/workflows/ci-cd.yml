@@ -104,6 +104,57 @@ jobs:
     - name: Eval contract and metrics smoke
       run: pytest tests/unit/test_eval_smoke_contract.py -v
 
+  index-fixture:
+    name: Index Fixture Smoke (BM25, no LLM)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
+
+    - name: Detect index fixture
+      id: fixture
+      run: |
+        if [ -f fixtures/astrology_mini/fixture.json ]; then
+          echo "present=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "present=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::Индекс-фикстура не в репозитории: сборка за владельцем (scripts/build_index_fixture.py). Джоб публикует отчёт-заглушку, а не результат retrieval."
+        fi
+
+    - name: BM25 smoke over fixture (no LLM, no models)
+      if: steps.fixture.outputs.present == 'true'
+      run: |
+        python scripts/index_fixture_smoke.py \
+          --fixture fixtures/astrology_mini \
+          --limit 10 \
+          --top-k 5 \
+          --out outputs/reports/fixture_smoke.json \
+          --markdown-out outputs/reports/fixture_smoke.md
+
+    - name: Publish fixture and smoke report as artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: index-fixture-and-smoke-report
+        path: |
+          fixtures/astrology_mini
+          outputs/reports/fixture_smoke.json
+          outputs/reports/fixture_smoke.md
+        if-no-files-found: warn
+        retention-days: 30
+
   clone-smoke:
     name: Clone Smoke Test
     runs-on: ubuntu-latest

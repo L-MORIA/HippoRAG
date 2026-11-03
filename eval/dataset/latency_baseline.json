@@ -1,0 +1,75 @@
+{
+  "generated_at": "2026-11-03",
+  "provenance": "Значения перенесены из eval/dataset/RESULTS_REPORTED.md — это фиксация живого прогона автора (scripts/eval_search_quality.py, индекс astrology_test, 40 вопросов H1-1). Сырой отчёт лежит вне репозитория (outputs/ в .gitignore), поэтому независимого воспроизведения из репозитория нет. После собственного прогона файл перезаписывается: python scripts/benchmark_budget.py --from-report <report.json> --update-baseline",
+  "transcribed_from": "eval/dataset/RESULTS_REPORTED.md",
+  "index": "astrology_test (1369 чанков), локальный",
+  "llm": "google/gemma-4-e4b (LM Studio, JIT)",
+  "n_questions": 40,
+  "budgets_ms": {
+    "default": 10000,
+    "llm": 30000,
+    "experimental_threshold": 30000
+  },
+  "modes": {
+    "1": {
+      "label": "Multi-vector",
+      "p50_ms": 6200,
+      "p95_ms": 12800,
+      "retrieval_p50_ms": null,
+      "retrieval_p95_ms": null,
+      "llm_calls_mean": 1.0,
+      "recall@k_doc": 0.975,
+      "mrr@k_doc": 0.921,
+      "ndcg@k_doc": 0.935,
+      "adequacy_mean": null
+    },
+    "2": {
+      "label": "Граф",
+      "p50_ms": 545,
+      "p95_ms": null,
+      "retrieval_p50_ms": null,
+      "retrieval_p95_ms": null,
+      "llm_calls_mean": 0.0,
+      "recall@k_doc": 0.95,
+      "mrr@k_doc": 0.921,
+      "ndcg@k_doc": null,
+      "adequacy_mean": null
+    },
+    "12": {
+      "label": "Self-RAG",
+      "p50_ms": 23800,
+      "p95_ms": 37900,
+      "retrieval_p50_ms": null,
+      "retrieval_p95_ms": null,
+      "llm_calls_mean": 1.0,
+      "recall@k_doc": null,
+      "mrr@k_doc": null,
+      "ndcg@k_doc": null,
+      "adequacy_mean": 0.753
+    },
+    "19": {
+      "label": "GraphRAG",
+      "p50_ms": 16600,
+      "p95_ms": 33000,
+      "retrieval_p50_ms": null,
+      "retrieval_p95_ms": null,
+      "llm_calls_mean": 1.0,
+      "recall@k_doc": null,
+      "mrr@k_doc": null,
+      "ndcg@k_doc": null,
+      "adequacy_mean": 0.667
+    },
+    "21": {
+      "label": "DAT+LLM",
+      "p50_ms": 21100,
+      "p95_ms": 29400,
+      "retrieval_p50_ms": null,
+      "retrieval_p95_ms": null,
+      "llm_calls_mean": 3.0,
+      "recall@k_doc": null,
+      "mrr@k_doc": null,
+      "ndcg@k_doc": null,
+      "adequacy_mean": 0.812
+    }
+  }
+}

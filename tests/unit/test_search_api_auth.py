@@ -6,7 +6,9 @@
 * D3/D7 — ключ обязателен по умолчанию (fail-closed), opt-out явный;
 * D5 — отказы считаются и видны в `/health`;
 * N1 — не-ASCII `API_KEY` не приводит к исключению (сравнение по байтам);
-* N2/N5 — origin в ответе об отказе берётся из запроса, а не захардкожен.
+* N2/N5 — origin в ответе об отказе берётся из запроса, а не захардкожен;
+* Z-1 — порядок регистрации middleware: CORS зарегистрирован **после** guard,
+  поэтому в Starlette он внешний слой и добавляет свои заголовки к 401.
 
 Guard проверяется и напрямую (без HTTP — HTTP-заголовки ASCII-only, а
 не-ASCII `API_KEY` из `.env` — реальный сценарий для русскоязычного проекта),
@@ -195,3 +197,51 @@ def test_preflight_allows_api_key_header(server_module):
     )
     assert response.status_code == 200
     assert "x-api-key" in (response.headers.get("access-control-allow-headers") or "").lower()
+
+
+# --- Z-1: порядок middleware (CORS — внешний слой) ------------------------
+
+
+def test_cors_middleware_is_outermost_layer(server_module):
+    """Z-1: CORS зарегистрирован после guard → в Starlette он внешний слой.
+
+    Starlette добавляет middleware в начало списка, поэтому последний
+    зарегистрированный оказывается внешним. `add_middleware(CORSMiddleware)`
+    стоит в `server.py` ниже декоратора `@app.middleware("http")` — значит,
+    CORS обрамляет guard, а не наоборот. Тест фиксирует сам порядок, чтобы
+    непреднамеренная перестановка регистраций была видна сразу.
+    """
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.middleware.cors import CORSMiddleware
+
+    classes = [m.cls for m in server_module.app.user_middleware]
+    assert classes[0] is CORSMiddleware, f"CORS должен быть внешним слоем, порядок: {classes}"
+    assert (
+        classes[1] is BaseHTTPMiddleware
+    ), f"guard должен быть внутренним слоем, порядок: {classes}"
+
+
+def test_401_still_gets_cors_headers_which_proves_layer_order(server_module):
+    """Z-1 (поведение): CORS-заголовки на 401 возможны только если CORS снаружи.
+
+    Если бы guard был внешним слоем, его `JSONResponse` ушёл бы мимо
+    CORSMiddleware и заголовков `access-control-allow-origin` в 401 не было бы.
+    """
+    client = _client(server_module)
+    response = client.get("/health", headers={"Origin": ALLOWED_ORIGINS[0], "X-API-Key": "wrong"})
+    assert response.status_code == 401
+    assert response.headers.get("access-control-allow-origin") == ALLOWED_ORIGINS[0]
+
+
+def test_guard_has_no_own_origin_list(server_module):
+    """Z-1: список origin — единственный источник (в CORS), guard его не дублирует.
+
+    Дублирование списка внутри guard — источник расхождений (бывший N2/N5),
+    поэтому фиксируем запрет явно.
+    """
+    import inspect
+
+    source = inspect.getsource(server_module.api_key_guard)
+    assert "ALLOWED_ORIGINS" not in source
+    assert "localhost" not in source
+    assert "allow_origins" not in source
