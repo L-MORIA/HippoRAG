@@ -185,16 +185,47 @@ def flatten_facts(chunk_triples: List[Triple]) -> List[Triple]:
     return graph_triples
 
 
+def normalize_scores(
+    scores, min_candidates: int = 3, fallback: float = 0.5, degenerate: float | None = None
+):
+    """Min-max нормировка с явным поведением в вырожденных случаях.
+
+    Зачем: при одном-двух кандидатах ``max - min`` либо ноль, либо разброс
+    между двумя случайными точками. Min-max в таком случае выдаёт 1.0 и 0.0 —
+    то есть превращает шум в «максимальную уверенность» (замечание Mavis, П-3).
+    Поэтому по умолчанию при ``n < min_candidates`` и при нулевом разбросе
+    возвращается ``fallback`` для всех элементов: сигнал «данных мало», а не
+    «лучший результат идеален».
+
+    ``min_candidates=1, fallback=1.0`` воспроизводит историческое поведение
+    ``min_max_normalize`` (совместимость со старыми вызовами).
+
+    Args:
+        scores: последовательность чисел или numpy-массив.
+        min_candidates: сколько кандидатов нужно, чтобы нормировка имела смысл.
+        fallback: значение, возвращаемое в вырожденных случаях.
+        degenerate: явное значение для ``range == 0``; ``None`` → ``fallback``.
+    """
+    values = np.asarray(scores, dtype=float)
+    if values.size == 0:
+        return values
+    if values.size < max(1, int(min_candidates)):
+        return np.full_like(values, float(fallback))
+
+    spread = float(np.max(values) - np.min(values))
+    if spread == 0:
+        return np.full_like(values, float(fallback if degenerate is None else degenerate))
+    return (values - np.min(values)) / spread
+
+
 def min_max_normalize(x):
-    min_val = np.min(x)
-    max_val = np.max(x)
-    range_val = max_val - min_val
+    """Историческая min-max нормировка (совместимость).
 
-    # Handle the case where all values are the same (range is zero)
-    if range_val == 0:
-        return np.ones_like(x)  # Return an array of ones with the same shape as x
-
-    return (x - min_val) / range_val
+    При нулевом разбросе возвращает единицы — так работали все вызовы до
+    появления ``normalize_scores``. Для новых вызовов, где число кандидатов
+    может быть 1–2, используйте ``normalize_scores``.
+    """
+    return normalize_scores(x, min_candidates=1, fallback=1.0)
 
 
 def build_citation_from_metadata(

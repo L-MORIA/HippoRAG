@@ -53,6 +53,23 @@ def test_min_max_normalize():
     assert (min_max_normalize(constant) == 1.0).all()
 
 
+def test_normalize_scores_guards_degenerate_candidate_sets():
+    """П-3: на 1–2 кандидатах min-max даёт 1.0/0.0 — это шум, а не уверенность."""
+    from hipporag.utils.misc_utils import normalize_scores
+
+    assert (normalize_scores([5.0]) == 0.5).all()
+    assert (normalize_scores([0.9, 0.1]) == 0.5).all()
+    # Три кандидата — обычная min-max нормировка
+    assert np.allclose(normalize_scores([1.0, 2.0, 3.0]), [0.0, 0.5, 1.0])
+    # Нулевой разброс при достаточном n — тоже fallback, а не единицы
+    assert (normalize_scores([2.0, 2.0, 2.0]) == 0.5).all()
+    # Явное значение для range == 0 переопределяет fallback
+    assert (normalize_scores([2.0, 2.0, 2.0], degenerate=0.0) == 0.0).all()
+    assert normalize_scores([]).size == 0
+    # Старый контракт min_max_normalize сохранён
+    assert (min_max_normalize(np.array([2.0, 2.0])) == 1.0).all()
+
+
 def test_query_solution_is_single_class():
     """S-18: misc_utils и custom_types экспортируют один и тот же класс."""
     from hipporag.utils.misc_utils import QuerySolution as from_misc

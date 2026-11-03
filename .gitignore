@@ -52,3 +52,6 @@ dist/
 *.epub
 *.djvu
 *.fb2
+
+# Черновые заготовки eval (генерируются scripts/eval_bootstrap_dataset.py)
+eval/dataset/candidates.jsonl
