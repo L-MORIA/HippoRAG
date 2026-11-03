@@ -32,12 +32,38 @@ start_time: float = time.time()
 
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "200"))
 API_KEY = os.getenv("API_KEY")
+# D3/D7: по умолчанию ключ обязателен — сервер не поднимается без API_KEY.
+# Явный opt-out (API_KEY_REQUIRED=0) оставлен только для локальной разработки.
+API_KEY_REQUIRED = os.getenv("API_KEY_REQUIRED", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
+# N2/N5: единый источник правды для CORS. Guard не дублирует список origin,
+# а CORS-слой обрамляет guard и добавляет заголовки ко всем ответам, включая 401.
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "API_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8000"
+    ).split(",")
+    if origin.strip()
+]
+
+# D5: счётчик отказов авторизации с момента запуска (виден в /health).
+auth_failures = 0
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Инициализация при запуске сервера: конфиг из env, проверка непустоты индекса."""
     global hipporag
+    if API_KEY_REQUIRED and not API_KEY:
+        raise RuntimeError(
+            "API_KEY обязателен (API_KEY_REQUIRED=1 по умолчанию), но не задан. "
+            "Задайте API_KEY в окружении или в .env. Для локальной разработки на "
+            "loopback отключение задаётся явно: API_KEY_REQUIRED=0."
+        )
     try:
         logger.info("Инициализация HippoRAG...")
         config = BaseConfig()
@@ -79,37 +105,60 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware для веб-приложений
+@app.middleware("http")
+async def api_key_guard(request: Request, call_next):
+    """Аутентификация по заголовку X-API-Key.
+
+    Требование ключа управляется API_KEY_REQUIRED (по умолчанию включено, D3/D7):
+    без API_KEY сервер не стартует, а при API_KEY_REQUIRED=0 остаётся fail-open
+    для локальной разработки.
+
+    CORS-preflight (OPTIONS) пропускается без проверки ключа: браузер не отправляет
+    ключ в preflight-запросе (D2). Отказы считаются и логируются (D5).
+    """
+    global auth_failures
+    if request.method != "OPTIONS":
+        if not API_KEY:
+            if API_KEY_REQUIRED:
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        "status": "error",
+                        "error": (
+                            "Сервер запущен без API_KEY при API_KEY_REQUIRED=1 — "
+                            "запросы не обслуживаются"
+                        ),
+                    },
+                )
+            return await call_next(request)
+        provided = request.headers.get("X-API-Key", "").encode("utf-8")
+        if not secrets.compare_digest(provided, API_KEY.encode("utf-8")):
+            auth_failures += 1
+            logger.warning(
+                "Отказ авторизации: неверный X-API-Key (path=%s, origin=%s, всего отказов: %d)",
+                request.url.path,
+                request.headers.get("origin") or "-",
+                auth_failures,
+            )
+            return JSONResponse(
+                status_code=401,
+                content={"status": "error", "error": "Требуется заголовок X-API-Key"},
+            )
+    return await call_next(request)
+
+
+# CORS middleware для веб-приложений.
+# Регистрируется ПОСЛЕ guard: в Starlette последний добавленный middleware становится
+# внешним, поэтому CORS обрамляет guard и добавляет свои заголовки ко всем ответам,
+# включая 401 — без дублирования списка origin внутри guard (N2/N5).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:8000"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     # X-API-Key нужен браузерному клиенту для передачи ключа (D1 из вердикта Mavis)
     allow_headers=["Content-Type", "Authorization", "X-API-Key"],
 )
-
-
-@app.middleware("http")
-async def api_key_guard(request: Request, call_next):
-    """Опциональная аутентификация: при заданном API_KEY требуется заголовок X-API-Key.
-
-    CORS-preflight (OPTIONS) пропускается без проверки ключа, чтобы браузер
-    получил CORS-метаданные и мог отправить сам запрос (D2).
-    """
-    if API_KEY and request.method != "OPTIONS":
-        provided = request.headers.get("X-API-Key", "").encode("utf-8")
-        if not secrets.compare_digest(provided, API_KEY.encode("utf-8")):
-            return JSONResponse(
-                status_code=401,
-                content={"status": "error", "error": "Требуется заголовок X-API-Key"},
-                headers={
-                    "Access-Control-Allow-Origin": "http://localhost:3000",
-                    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key",
-                    "Access-Control-Allow-Credentials": "true",
-                },
-            )
-    return await call_next(request)
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -127,6 +176,8 @@ async def health_check():
         uptime=uptime_str,
         chunks=chunk_count,
         facts=fact_count,
+        auth_required=API_KEY_REQUIRED,
+        auth_failures=auth_failures,
     )
 
 
