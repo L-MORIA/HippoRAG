@@ -113,13 +113,20 @@ for result in results:
 Start the FastAPI server:
 
 ```bash
-uvicorn src.hipporag.search_api.server:app --host 0.0.0.0 --port 8000
+# По умолчанию — только loopback (127.0.0.1): наружу API не выставляется.
+# Ключ обязателен: без API_KEY (при API_KEY_REQUIRED=1) сервер не стартует.
+export API_KEY=your-secret-key
+uvicorn src.hipporag.search_api.server:app --host 127.0.0.1 --port 8000
 ```
 
 Endpoints:
 - POST /ingest - Upload and index PDF files
 - POST /search - Search with questions
-- GET /health - Health check
+- GET /health - Health check (includes `auth_required` and `auth_failures`)
+
+To expose the API beyond localhost, set `API_KEY` and publish the port through an
+SSH tunnel or a TLS reverse-proxy; binding to `0.0.0.0` without a key is refused by
+default (`API_KEY_REQUIRED=1`).
 
 ### Requirements
 
