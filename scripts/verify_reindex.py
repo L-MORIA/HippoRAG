@@ -9,10 +9,15 @@ TestClient-сессии, критерии 1, 2, 4 — по parquet/graph без 
 
 import io
 import logging
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+# Локальная приёмка без ключа: сервер поднимается в режиме fail-open.
+# В проде ключ обязателен (API_KEY_REQUIRED=1 по умолчанию).
+os.environ.setdefault("API_KEY_REQUIRED", "0")
 
 import pandas as pd  # noqa: E402
 
