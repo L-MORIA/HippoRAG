@@ -2,6 +2,7 @@
 
 > **Это форк/расширение HippoRAG.** Продуктовая документация и инструкция по
 > запуску — [README_RU.md](README_RU.md) и [docs/HOW_TO_RUN.md](docs/HOW_TO_RUN.md).
+> План развития — [docs/ROADMAP_REVISION_DEEPSEEK.md](docs/ROADMAP_REVISION_DEEPSEEK.md) (v1.2, H0 → H3).
 > Upstream: https://github.com/OSU-NLP-Group/HippoRAG
 
 <p align="center">

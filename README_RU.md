@@ -5,6 +5,7 @@
 ## Быстрый старт
 
 Полная инструкция — [docs/HOW_TO_RUN.md](docs/HOW_TO_RUN.md).
+План развития проекта — [docs/ROADMAP_REVISION_DEEPSEEK.md](docs/ROADMAP_REVISION_DEEPSEEK.md) (v1.2, горизонты H0 → H3).
 
 ```bash
 python -m pip install -e ".[dev]"

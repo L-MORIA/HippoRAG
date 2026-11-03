@@ -1,7 +1,8 @@
 # Как запустить HippoRAG
 
 Короткая инструкция: от чистого клона до первого ответа. Подробности по
-индексации — в [INDEXING_GUIDE.md](./INDEXING_GUIDE.md).
+индексации — в [INDEXING_GUIDE.md](./INDEXING_GUIDE.md). План развития проекта —
+в [ROADMAP_REVISION_DEEPSEEK.md](./ROADMAP_REVISION_DEEPSEEK.md).
 
 ## 1. Что нужно
 

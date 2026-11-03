@@ -3,7 +3,8 @@
 Thank you for your interest in contributing to HippoRAG!
 
 > **Current project state:** 23 search methods, LLM configured via `.env`, SQLite QA/LLM cache.  
-> Full documentation: **[QUICKSTART_RU.md](./QUICKSTART_RU.md)** (Russian) · **[QUICKSTART.md](./QUICKSTART.md)** (English) · **[USER_GUIDE.md](./USER_GUIDE.md)**
+> Full documentation: **[QUICKSTART_RU.md](./QUICKSTART_RU.md)** (Russian) · **[QUICKSTART.md](./QUICKSTART.md)** (English) · **[USER_GUIDE.md](./USER_GUIDE.md)**  
+> Development plan (the working one): **[ROADMAP_REVISION_DEEPSEEK.md](./ROADMAP_REVISION_DEEPSEEK.md)** (v1.2) — take tasks from §9, order H0 → H3.
 
 ## How to Contribute
 
