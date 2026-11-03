@@ -1,4 +1,9 @@
 <h1 align="center">HippoRAG 2: From RAG to Memory</h1>
+
+> **Это форк/расширение HippoRAG.** Продуктовая документация и инструкция по
+> запуску — [README_RU.md](README_RU.md) и [docs/HOW_TO_RUN.md](docs/HOW_TO_RUN.md).
+> Upstream: https://github.com/OSU-NLP-Group/HippoRAG
+
 <p align="center">
     <img src="https://github.com/OSU-NLP-Group/HippoRAG/raw/main/images/hippo_brain.png" width="55%" style="max-width: 300px;">
 </p>

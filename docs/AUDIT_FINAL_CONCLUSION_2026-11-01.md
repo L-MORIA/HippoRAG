@@ -9,7 +9,7 @@
 |------|-----------|
 | `docs/AUDIT_2026-11-01.md` | Исходный аудит ядра (18 находок) |
 | `docs/AUDIT_REPORT.md` | Аудит ZCode (GLM) |
-| `HIPPORAG_AUDIT_FRESH_2026-11-01.md` | Санитарный скан OpenCode Agent |
+| `AUDIT_FRESH_2026-11-01.md` | Санитарный скан OpenCode Agent |
 | `docs/AUDIT_SYNTHESIS_2026-11-01.md` | Сводный реестр S-01…S-45 + план этапов 0–6 + журнал |
 | `docs/AUDIT_SYNTHESIS_VERDICT_2026-11-01.md` | Вердикт по синтезу → 3 условия |
 | `docs/AUDIT_EXECUTION_VERDICT_2026-11-01.md` | Проверка раунда 1 → 8 расхождений (D-1…D-8) |

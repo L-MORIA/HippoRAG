@@ -213,8 +213,6 @@ __all__ = [
 ]
 
 
-__all__ = ["main", "MODEL_OPTIONS"]
-
 if __name__ == "__main__":
     freeze_support()
     main()

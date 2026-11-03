@@ -5,6 +5,10 @@ QA-кэш, честный отказ для специализированных
 из реестра MODES вместо if/elif.
 """
 
+from __future__ import annotations
+
+import sys
+
 from . import config
 from .display import show_results
 from .modes import MODES
@@ -57,6 +61,12 @@ def _qa_run_test(hipporag, query):
 
 
 def main():
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print("hipo-rag — интерактивный поиск по астрологическим PDF.")
+        print("Запуск без аргументов: hipo-rag")
+        print("Модель и режим выбираются в меню; настройки — в .env.")
+        return
+
     print("=" * 80)
     print("HIPPORAG - Поиск по базе знаний (астрофэншуй)")
     print("=" * 80)

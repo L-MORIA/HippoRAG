@@ -1,0 +1,125 @@
+# Как запустить HippoRAG
+
+Короткая инструкция: от чистого клона до первого ответа. Подробности по
+индексации — в [INDEXING_GUIDE.md](./INDEXING_GUIDE.md).
+
+## 1. Что нужно
+
+- **Python 3.10–3.12** (проект проверяется на 3.10, 3.11, 3.12; 3.13+ не
+  гарантируется).
+- **LM Studio** с одной из моделей: `google/gemma-4-e4b`,
+  `google/gemma-4-26b-a4b`, Qwen3.6-дистиллят или `nvidia/nemotron-3-nano-4b`.
+- **8+ ГБ RAM**; все методы работают на CPU, CUDA не требуется.
+- PDF-книги для индексации (в репозитории их нет — `data/` в `.gitignore`).
+
+## 2. Установка
+
+```bash
+git clone https://github.com/L-MORIA/HippoRAG.git
+cd HippoRAG
+python -m venv .venv
+```
+
+Windows (PowerShell):
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -e ".[dev]"
+```
+
+Linux/macOS:
+
+```bash
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -e ".[dev]"
+```
+
+Проверка, что пакет и точка входа видны:
+
+```bash
+python -c "import main; print('ok')"
+```
+
+## 3. LM Studio
+
+1. Установите LM Studio и загрузите одну из моделей выше.
+2. Запустите локальный сервер: **Developer → Start Server**, порт `1234`.
+3. Проверьте, что API отвечает:
+
+```bash
+curl http://localhost:1234/v1/models
+```
+
+## 4. Конфигурация
+
+Создайте в корне проекта файл `.env` (он в `.gitignore`, в git не попадёт):
+
+```dotenv
+LLM_NAME=google/gemma-4-e4b
+LLM_BASE_URL=http://localhost:1234/v1
+SAVE_DIR=outputs/astrology
+```
+
+`SAVE_DIR` важен: индексатор по умолчанию пишет в `outputs/astrology`, а
+приложение без этой переменной читает `outputs/astrology_test`. Одна и та же
+переменная должна быть задана и при индексации, и при поиске.
+
+## 5. PDF и индексация
+
+Положите PDF в `data/pdfs/` (подкаталоги поддерживаются):
+
+```bash
+python index_pdfs.py --pdf_dir data/pdfs --output_dir outputs/astrology
+```
+
+Для сканированных PDF добавьте OCR (нужен установленный Tesseract):
+
+```bash
+python index_pdfs.py --pdf_dir data/pdfs --output_dir outputs/astrology \
+  --enable_ocr --ocr_language rus
+```
+
+Индексация трёх книг занимает часы и требует работающего LM Studio: факты
+извлекаются через LLM. Прогресс пишется в `indexing.log`.
+
+## 6. Проверка индекса
+
+```bash
+python scripts/show_index_stats.py --save_dir outputs/astrology
+```
+
+Скрипт печатает число чанков, сущностей, фактов, узлов и рёбер графа. Числа
+зависят от корпуса — не сверяйте их с README, сверяйте с этим выводом.
+
+## 7. Первый запрос
+
+```bash
+python main.py
+```
+
+1. Выберите модель (Enter — текущая из `.env`).
+2. Дождитесь `Загрузка индекса... Готово!`.
+3. Выберите режим, например `22` (Pattern Search, без LLM) или `12`
+   (Self-RAG), и введите вопрос.
+
+Если индекс не найден, приложение сообщит об этом или загрузит пустой индекс:
+в первую очередь проверьте `SAVE_DIR` и имя embedding-модели.
+
+## 8. Тесты
+
+```bash
+pytest tests/unit -m unit
+```
+
+## Типовые ошибки
+
+| Симптом | Причина и решение |
+|---|---|
+| `ModuleNotFoundError: No module named 'astro_app'` | Не выполнена editable-установка: `pip install -e ".[dev]"` |
+| `Connection refused` к `localhost:1234` | Не запущен сервер LM Studio или другой порт — проверьте `LLM_BASE_URL` |
+| Индекс «пустой», хотя файлы есть | `SAVE_DIR` при индексации и при поиске различаются |
+| `ModuleNotFoundError: rank_bm25` / `igraph` | Установлены не все зависимости: повторите `pip install -e ".[dev]"` |
+| Ошибки на Python 3.13/3.14 | Используйте Python 3.10–3.12 |
+| OCR не работает | Не установлен Tesseract или язык `rus` в нём |

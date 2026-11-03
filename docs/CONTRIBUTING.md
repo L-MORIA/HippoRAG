@@ -27,13 +27,13 @@ Thank you for your interest in contributing to HippoRAG!
 
 | Hook | Scope | Purpose |
 |------|-------|---------|
-| `black`, `isort` | `src/`, `tests/` | formatting (line length 100) |
-| `ruff` | `src/`, `tests/` | real errors: syntax, pyflakes, bugbear |
+| `black`, `isort` | `src/`, `tests/`, `main.py` | formatting (line length 100) |
+| `ruff` | `src/`, `tests/`, `main.py` | real errors: syntax, pyflakes, bugbear |
 | `bandit` | `src/`, `tests/` | security issues |
-| `trailing-whitespace`, `end-of-file-fixer`, `mixed-line-ending` | `src/`, `tests/` | text hygiene |
+| `trailing-whitespace`, `end-of-file-fixer`, `mixed-line-ending` | `src/`, `tests/`, `main.py` | text hygiene |
 | `check-yaml`, `check-json`, `check-merge-conflict`, `debug-statements` | — | structure and leftovers |
 
-The hook scope matches the CI scope exactly (`src/`, `tests/`) — CI runs the same tools on
+The hook scope matches the CI scope exactly (`src/`, `tests/`, `main.py`) — CI runs the same tools on
 the whole tree after push. To skip a hook once: `SKIP=ruff git commit -m "..."`.
 
 ## Before You Start, File an Issue

@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "hipporag"
 version = "2.0.0-alpha.4"
 description = "Graph-based Retrieval-Augmented Generation framework for multi-hop question answering"
-readme = "README.md"
+readme = "README_RU.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
@@ -89,10 +89,16 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/OSU-NLP-Group/HippoRAG"
-Documentation = "https://hipporag.readthedocs.io"
-Repository = "https://github.com/OSU-NLP-Group/HippoRAG.git"
-Issues = "https://github.com/OSU-NLP-Group/HippoRAG/issues"
+Homepage = "https://github.com/L-MORIA/HippoRAG"
+Documentation = "https://github.com/L-MORIA/HippoRAG/blob/main/docs/HOW_TO_RUN.md"
+Repository = "https://github.com/L-MORIA/HippoRAG.git"
+Issues = "https://github.com/L-MORIA/HippoRAG/issues"
+
+[project.scripts]
+hipo-rag = "astro_app.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.setuptools.package-data]
 astro_app = ["data/*.json"]
