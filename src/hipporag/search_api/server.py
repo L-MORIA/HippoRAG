@@ -84,17 +84,27 @@ app.add_middleware(
     allow_origins=["http://localhost:3000", "http://localhost:8000"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"],
+    # X-API-Key нужен браузерному клиенту для передачи ключа (D1 из вердикта Mavis)
+    allow_headers=["Content-Type", "Authorization", "X-API-Key"],
 )
 
 
 @app.middleware("http")
 async def api_key_guard(request: Request, call_next):
-    """Опциональная аутентификация: при заданном API_KEY требуется заголовок X-API-Key."""
-    if API_KEY and request.headers.get("X-API-Key") != API_KEY:
-        return JSONResponse(
-            status_code=401, content={"status": "error", "error": "Требуется заголовок X-API-Key"}
-        )
+    """Опциональная аутентификация: при заданном API_KEY требуется заголовок X-API-Key.
+
+    CORS-preflight (OPTIONS) пропускается без проверки ключа, чтобы браузер
+    получил CORS-метаданные и мог отправить сам запрос (D2).
+    """
+    if API_KEY and request.method != "OPTIONS":
+        import secrets
+
+        provided = request.headers.get("X-API-Key", "")
+        if not secrets.compare_digest(provided, API_KEY):
+            return JSONResponse(
+                status_code=401,
+                content={"status": "error", "error": "Требуется заголовок X-API-Key"},
+            )
     return await call_next(request)
 
 
