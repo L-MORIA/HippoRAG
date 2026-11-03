@@ -105,6 +105,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
 @app.middleware("http")
 async def api_key_guard(request: Request, call_next):
     """Аутентификация по заголовку X-API-Key.
