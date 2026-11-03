@@ -8,9 +8,9 @@ on:
       - '**/*.md'
   pull_request:
     branches: [ main ]
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
+    # paths-ignore для PR намеренно убран: docs-only PR должны получать
+    # статус-checks, иначе они не проходят правило ветки main и внешний
+    # контрибьютор не может прислать документацию (аудит, §7.4).
   schedule:
     - cron: '0 0 * * 0'  # Weekly on Sunday
   workflow_dispatch:
@@ -81,6 +81,28 @@ jobs:
 
     - name: Run unit tests
       run: pytest tests/unit -v -m unit
+
+  eval-smoke:
+    name: Eval Smoke (10 questions, no LLM)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
+
+    - name: Eval contract and metrics smoke
+      run: pytest tests/unit/test_eval_smoke_contract.py -v
 
   clone-smoke:
     name: Clone Smoke Test
