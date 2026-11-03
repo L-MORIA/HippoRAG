@@ -37,6 +37,29 @@ Thank you for your interest in contributing to HippoRAG!
 The hook scope matches the CI scope exactly (`src/`, `tests/`, `main.py`) — CI runs the same tools on
 the whole tree after push. To skip a hook once: `SKIP=ruff git commit -m "..."`.
 
+### Push guard: never push to the upstream by accident
+
+This repository is a fork, and `origin` may point at the upstream project while your own
+changes belong to `L-MORIA/HippoRAG`. A local `pre-push` hook rejects any push whose
+destination is not the project's own repository. It keys off the **URL**, so the remote
+name (`origin`, `fork`, `upstream`) does not matter.
+
+Install it once per clone — `.git/` is not versioned, so the hook is not shipped with the code:
+
+```bash
+python scripts/check_push_remote.py --install
+```
+
+Check an address without pushing anything:
+
+```bash
+python scripts/check_push_remote.py --check-url https://github.com/L-MORIA/HippoRAG.git
+```
+
+The logic lives in `scripts/check_push_remote.py`, the tests in
+`tests/unit/test_check_push_remote.py`. For a deliberate push elsewhere, bypass once with
+`GIT_ALLOW_FOREIGN_PUSH=1 git push ...`.
+
 ## Before You Start, File an Issue
 
 Please file an issue **BEFORE** starting work to fix/implement something.  
