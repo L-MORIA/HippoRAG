@@ -11,7 +11,8 @@ import sys
 
 from . import config
 from .display import show_results
-from .modes import MODES
+from .menu import default_mode_label, print_modes_menu
+from .modes import DEFAULT_MODE, MODES
 from .qa_cache import _qa_export_training, _qa_load, _qa_lookup, _qa_store
 
 MODEL_OPTIONS = {
@@ -90,15 +91,15 @@ def main():
 
     while True:
         print("-" * 80)
-        print("Режимы поиска:")
-        for num, spec in MODES.items():
-            print(f"  {num} — {spec.menu}{' ⭐' if spec.star else ''}")
-            if spec.special:
-                print(f"       {spec.special}")
-        print("  t — Тестирование всех методов по кэшу")
-        print("  e — Экспорт кэша в JSONL (для обучения)")
-        print("  q — Выход")
-        mode = input("Выбор [1-23/q/t/e]: ").strip().lower()
+        print_modes_menu()
+        mode = (
+            input(
+                f"Выбор [1-23/q/t/e], Enter — режим {DEFAULT_MODE} «{default_mode_label()}» "
+                "(по умолчанию): "
+            )
+            .strip()
+            .lower()
+        )
         if mode == "q":
             break
         if mode == "t":
@@ -116,6 +117,9 @@ def main():
         if mode == "e":
             _qa_export_training()
             continue
+        if not mode:
+            mode = DEFAULT_MODE
+            print(f"  → Режим {DEFAULT_MODE} «{default_mode_label()}» (по умолчанию)")
         if mode not in MODES:
             continue
 
