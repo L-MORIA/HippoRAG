@@ -93,5 +93,7 @@ def test_expected_terms_consistent_with_reference_answers(smoke):
     """Разметка согласована: эталонные термины есть в эталонном ответе."""
     for question in smoke:
         normalized = ev.normalize_text(question.reference_answer or "")
-        hits = [term for term in (question.expected_terms or []) if ev.term_matches(term, normalized)]
+        hits = [
+            term for term in (question.expected_terms or []) if ev.term_matches(term, normalized)
+        ]
         assert hits, f"{question.qid}: ни один expected_term не найден в reference_answer"
