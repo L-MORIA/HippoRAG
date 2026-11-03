@@ -58,6 +58,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 from astro_app import evaluation as ev  # noqa: E402
+from astro_app import config as astro_config  # noqa: E402
 from astro_app.config import LLM_BASE_URL, LLM_NAME  # noqa: E402
 from astro_app.modes import MODES  # noqa: E402
 
@@ -423,6 +424,15 @@ def parse_args(argv=None):
     parser.add_argument("--dataset", default=DEFAULT_DATASET)
     parser.add_argument("--index", default=DEFAULT_INDEX, help="save_dir индекса")
     parser.add_argument("--embedding-model", default=DEFAULT_EMBEDDING)
+    parser.add_argument(
+        "--llm-name",
+        default=None,
+        help=(
+            "id модели в API (LM Studio отдаёт его с префиксом, например "
+            "google/gemma-4-e4b). Каталог индекса по-прежнему строится из "
+            "LLM_NAME: индекс собирался под именем без префикса"
+        ),
+    )
     parser.add_argument("--modes", default="2", help="'2', '2,5,20', 'retrieval', 'answers', 'all'")
     parser.add_argument("--limit", type=int, default=0, help="первые N вопросов (0 — все)")
     parser.add_argument("--include-draft", action="store_true", help="включить черновики")
@@ -460,6 +470,12 @@ def main(argv=None) -> int:
 
     dataset = ev.load_dataset(args.dataset)
     working = working_dir_for(args.index, LLM_NAME, args.embedding_model)
+    # Каталог индекса строится из LLM_NAME (под ним индекс собирали), а в API
+    # может уходить другой id: LM Studio отдаёт модели с префиксом издателя
+    # («google/gemma-4-e4b»), и без префикса запрос падает с 400.
+    llm_name = args.llm_name or LLM_NAME
+    if args.llm_name:
+        astro_config.LLM_NAME = args.llm_name
     lookup = None
     index_stats = {}
     if not (args.validate_only and args.no_index_check):
@@ -586,7 +602,7 @@ def main(argv=None) -> int:
                 **index_stats,
             },
             "llm": {
-                "name": LLM_NAME,
+                "name": llm_name,
                 "base_url": LLM_BASE_URL,
                 "available": available,
                 "stubbed": args.stub_llm,
