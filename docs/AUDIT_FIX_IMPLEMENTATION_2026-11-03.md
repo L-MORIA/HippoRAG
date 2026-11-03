@@ -231,7 +231,7 @@ workflow`, подтверждение владельцем) → `gist, read:org,
 | `isort --check-only` | проверяет CI (локально пакет недоступен) |
 | `pytest tests/unit -m unit` | ✅ 228 passed |
 | `clone-smoke`, `wheel-smoke` | ✅ |
-| `Eval Smoke` (новый джоб) | выполняется в CI на каждом PR и push |
+| `Eval Smoke` (новый джоб) | выполняется на каждом PR и на каждом push, затрагивающем код (docs-only push пропускается `paths-ignore` — это осознанная экономия) |
 | `pull_request` без `paths-ignore` | ✅ PR любого состава получают статус-checks |
 
 ---
