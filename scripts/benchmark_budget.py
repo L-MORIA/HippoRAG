@@ -97,9 +97,17 @@ def load_report(path: Path) -> Dict[str, Any]:
     return data
 
 
-def build_baseline(report: Dict[str, Any]) -> Dict[str, Any]:
-    """Снимок замеров для репозитория (машинно-читаемый)."""
+def build_baseline(report: Dict[str, Any], *, source: Optional[str] = None) -> Dict[str, Any]:
+    """Снимок замеров для репозитория (машинно-читаемый).
+
+    Каждый режим получает собственное происхождение — `measured_at` и
+    `source`: снимок собирается слиянием нескольких прогонов, и без метки
+    «откуда взяты числа этого режима» нельзя понять, какой из них к какому
+    относится (аудит 04.11.2026, Н-5). Верхнеуровневые `index`/`dataset`/`llm`
+    описывают **последний** прогон — об этом сказано в `top_level_scope`.
+    """
     meta = report.get("meta") or {}
+    generated_at = datetime.now().isoformat(timespec="seconds")
     modes: Dict[str, Any] = {}
     for summary in report.get("summaries") or []:
         mode = summary.get("mode") or {}
@@ -110,21 +118,33 @@ def build_baseline(report: Dict[str, Any]) -> Dict[str, Any]:
         retrieval = summary.get("retrieval_ms") or {}
         modes[mode_id] = {
             "label": mode.get("label", ""),
+            "measured_at": generated_at,
+            "source": source or "неизвестно",
             "p50_ms": latency.get("p50"),
             "p95_ms": latency.get("p95"),
             "retrieval_p50_ms": retrieval.get("p50"),
             "retrieval_p95_ms": retrieval.get("p95"),
             "llm_calls_mean": summary.get("llm_calls_mean"),
+            # Документные и страничные метрики — обе группы: сравнивать режимы
+            # только по документным нельзя, на этом корпусе документный уровень
+            # почти не различает режимы (аудит 04.11.2026, Н-4).
             "recall@k_doc": summary.get("recall@k_doc"),
+            "recall@k_page": summary.get("recall@k_page"),
             "mrr@k_doc": summary.get("mrr@k_doc"),
+            "mrr@k_page": summary.get("mrr@k_page"),
             "ndcg@k_doc": summary.get("ndcg@k_doc"),
+            "ndcg@k_page": summary.get("ndcg@k_page"),
             "adequacy_mean": summary.get("adequacy_mean"),
         }
     return {
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "generated_at": generated_at,
         "provenance": (
             "живой прогон scripts/eval_search_quality.py; сырой отчёт лежит вне репозитория "
             "(outputs/ в .gitignore), здесь — машинно-читаемый снимок агрегатов"
+        ),
+        "top_level_scope": (
+            "index/dataset/llm/n_questions описывают ПОСЛЕДНИЙ прогон; у каждого режима "
+            "своё происхождение — modes.<id>.measured_at и modes.<id>.source"
         ),
         "index": (meta.get("index") or {}).get("path"),
         "dataset": meta.get("dataset"),
@@ -194,6 +214,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("В отчёте нет сводок по режимам — нечего оценивать", file=sys.stderr)
         return 2
 
+    # Происхождение прогона: без него в снимке нечем объяснить, откуда взялись
+    # числа конкретного режима (аудит 04.11.2026, Н-5).
+    report_source = str(args.from_report) if args.from_report else "новый прогон"
+
     verdicts = perf.evaluate_budgets(summaries)
     table = perf.format_budget_table(verdicts["modes"])
 
@@ -214,7 +238,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     payload = {
         "meta": {
             "generated_at": datetime.now().isoformat(timespec="seconds"),
-            "source_report": str(args.from_report) if args.from_report else "новый прогон",
+            "source_report": report_source,
             "modes": _parse_modes(args.modes),
         },
         "budgets_ms": {
@@ -240,7 +264,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"Таблица: {md_path}")
 
     if args.update_baseline:
-        baseline = build_baseline(report)
+        baseline = build_baseline(report, source=report_source)
         BASELINE_FILE.parent.mkdir(parents=True, exist_ok=True)
         BASELINE_FILE.write_text(
             json.dumps(baseline, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
@@ -248,7 +272,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"Снимок замеров обновлён: {BASELINE_FILE.relative_to(ROOT)}")
 
     if args.merge_baseline:
-        merged = perf.merge_baseline(perf.load_baseline(), build_baseline(report))
+        merged = perf.merge_baseline(
+            perf.load_baseline(), build_baseline(report, source=report_source)
+        )
         BASELINE_FILE.parent.mkdir(parents=True, exist_ok=True)
         BASELINE_FILE.write_text(
             json.dumps(merged, ensure_ascii=False, indent=2, default=str), encoding="utf-8"

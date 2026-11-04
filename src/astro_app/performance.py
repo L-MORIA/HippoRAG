@@ -184,6 +184,14 @@ def merge_baseline(existing: Dict[str, Any], fresh: Dict[str, Any]) -> Dict[str,
     Запись снимка целиком теряет режимы, которых не было в текущем прогоне:
     замерили только режим 5 — пропали 1, 12, 19, 21. Слияние обновляет лишь
     измеренное, остальное сохраняет как есть.
+
+    Происхождение (аудит 04.11.2026, Н-5). Снимок собирается из нескольких
+    прогонов, поэтому у **каждого** режима своя метка `measured_at`/`source`
+    (её проставляет `scripts/benchmark_budget.py::build_baseline`), а
+    `merged_at` в записи режима — когда эта запись последний раз обновлялась.
+    Верхнеуровневые `index`/`dataset`/`llm` по-прежнему описывают **последний**
+    прогон; чтобы это не читалось как «все режимы мерились так», рядом с ними
+    лежит `top_level_scope`.
     """
     merged: Dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
     incoming: Dict[str, Any] = fresh if isinstance(fresh, dict) else {}
@@ -195,7 +203,18 @@ def merge_baseline(existing: Dict[str, Any], fresh: Dict[str, Any]) -> Dict[str,
 
     updated = sorted(str(mode) for mode in (incoming.get("modes") or {}))
     modes: Dict[str, Any] = dict(merged.get("modes") or {})
-    modes.update(incoming.get("modes") or {})
+    incoming_modes = incoming.get("modes") or {}
+    merged_at = datetime.now().isoformat(timespec="seconds")
+    for mode_id, entry in incoming_modes.items():
+        if not isinstance(entry, dict):
+            modes[mode_id] = entry
+            continue
+        # Происхождение не выдумывается: если его не было в прогоне, в снимке
+        # оно тоже не появится — зато появится отметка о времени слияния.
+        record = dict(entry)
+        record.setdefault("source", "неизвестно")
+        record["merged_at"] = merged_at
+        modes[mode_id] = record
     merged["modes"] = modes
 
     # Прогон без LLM не должен перезаписывать модель, которой мерили
@@ -207,11 +226,16 @@ def merge_baseline(existing: Dict[str, Any], fresh: Dict[str, Any]) -> Dict[str,
     merged["llm"] = incoming.get("llm") if fresh_uses_llm else (previous_llm or incoming.get("llm"))
 
     merged["generated_at"] = incoming.get("generated_at") or merged.get("generated_at")
-    merged["merged_at"] = datetime.now().isoformat(timespec="seconds")
+    merged["merged_at"] = merged_at
     merged["merged_modes"] = updated
+    merged["top_level_scope"] = (
+        "index/dataset/llm/n_questions описывают ПОСЛЕДНИЙ прогон; у каждого режима "
+        "своё происхождение — modes.<id>.measured_at и modes.<id>.source"
+    )
     merged["provenance"] = (
         "слияние снимков: режимы из последнего прогона заменяют одноимённые, "
-        "остальные сохранены; сырые отчёты лежат вне репозитория (outputs/ в .gitignore)"
+        "остальные сохранены; у каждого режима своё происхождение "
+        "(measured_at/source), сырые отчёты лежат вне репозитория (outputs/ в .gitignore)"
     )
     return merged
 

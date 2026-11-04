@@ -822,6 +822,10 @@ def summarize_mode(
         "mrr@k_doc": round(mrr_at_k(doc_ranks, mrr_k), 4) if doc_ranks else None,
         "mrr@k_page": round(mrr_at_k(page_ranks, mrr_k), 4) if page_ranks else None,
         "ndcg@k_doc": round(ndcg_at_k(doc_ranks, ndcg_k), 4) if doc_ranks else None,
+        # Страничный nDCG — тоже нужен: без него набор страничных метрик
+        # неполон, а сравнивать режимы приходится по «recall + MRR», а nDCG
+        # на документах у режимов 1/2/5 почти совпадает (аудит 04.11.2026, Н-4).
+        "ndcg@k_page": round(ndcg_at_k(page_ranks, ndcg_k), 4) if page_ranks else None,
         "refusal_rate": _rate([is_refusal(t) for t in answer_texts]),
         "empty_rate": _rate([is_empty(t) for t in answer_texts]),
         "adequacy_mean": _mean(adequacy),

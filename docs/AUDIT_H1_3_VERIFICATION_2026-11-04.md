@@ -251,3 +251,20 @@
 * снимок замеров: `eval/dataset/latency_baseline.json`;
 * агрегаты замеров: `eval/dataset/RESULTS_REPORTED.md`;
 * предыдущая верификация: `docs/AUDIT_FIX_IMPLEMENTATION_2026-11-03.md` (§10 — раунд 4).
+
+---
+
+## 10. Дополнение от 2026-11-04 (раунд 6): что из этого сделано
+
+| Находка | Статус | Где закрыта |
+|---|---|---|
+| **Н-1** документы противоречат коду | закрыто | Синхронизированы с кодом (default = «5», рекомендованы 2 и 5): `README_RU.md`, `docs/HOW_TO_RUN.md`, `docs/QUICKSTART.md`, `docs/PERFORMANCE.md` (§1, §3, §3.1, §5, §6), `docs/ROADMAP_REVISION_DEEPSEEK.md` (§0.2, H1-2, H1-3, H1-5), `docs/H1_3_LATENCY_REPORT_2026-11-04.md` (шапка, §3.1, §7). Историческим документам `docs/AUDIT_FIX_IMPLEMENTATION_2026-11-03.md` §10.2 и `docs/MAVIS_ROUND3_REMARKS.md` §7.3 добавлена пометка «пересмотрено 04.11.2026» |
+| **Н-2** продуктовое решение принято вопреки процедуре отчёта | закрыто | **Решение владельца от 04.11.2026: default = режим 5.** Обоснование и честная оговорка (режим 2 минимально лучше по документным MRR@10 и nDCG@10 — в пределах разрешения выборки) — в `docs/H1_3_LATENCY_REPORT_2026-11-04.md` §7 и `docs/PERFORMANCE.md` §3.1 и §5 |
+| **Н-3** тихая деградация без cross-encoder | закрыто | `src/astro_app/rerankers.py`: предупреждение уходит в **stderr** и прямо говорит «ПЕРЕРАНК НЕ ВЫПОЛНЕН»; причина доступна программно (`crossencoder_ru_unavailable_reason()`); строгий режим `HIPPORAG_REQUIRE_CROSSENCODER=1` вместо деградации вызывает исключение; `src/astro_app/cli.py` объявляет деградацию на уровне режима |
+| **Н-4** страничные метрики не в снимке | закрыто | `summarize_mode` теперь отдаёт `ndcg@k_page`; `build_baseline` пишет `recall@k_page`, `mrr@k_page`, `ndcg@k_page`; в снимке страничные метрики режимов 1, 2 и 5 перенесены из отчётов |
+| **Н-5** смешивание прогонов в merge | закрыто | У каждого режима в снимке своё происхождение: `measured_at` и `source`; `merge_baseline` проставляет `merged_at` в записи режима; верхнеуровневые `index`/`dataset`/`llm` помечены как относящиеся к **последнему** прогону (`top_level_scope`) |
+| **Н-6** ослабленная проверка в тестах | закрыто | Имена и докстринги теста H1-2 приведены в соответствие с кодом; в `test_evaluate_mode_marks_default_violation` вернулись проверки `status == STATUS_OVER_BUDGET` и `margin_ms == -1_000` |
+| **Н-7** битый Markdown + нет LF | закрыто | `docs/PERFORMANCE.md` §6 — список приведён к виду «пункт + `*` пункт»; `eval/dataset/latency_baseline.json` — завершающий LF, кодировка UTF-8 без BOM, переводы строк LF |
+| **Н-8** push в `main` без PR | учтено | Публикация этого раунда — отдельная ветка + PR + squash-merge |
+
+Отчёт по раунду: `docs/AUDIT_RECHECK_FIX_2026-11-04.md`.

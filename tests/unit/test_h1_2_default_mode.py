@@ -3,8 +3,8 @@
 После H1-2 должно быть правдой:
 
 * `DEFAULT_MODE` существует в реестре и это измеренный режим «5» (BM25+CE-ru, p95 225 мс) —
-  единственный измеренный режим, укладывающийся в бюджет p95 ≤ 10 с;
-* ровно два рекомендованных режима — «1» и «2», и только у них `star`;
+  режим по умолчанию выбран решением владельца от 04.11.2026 по данным H1-3;
+* ровно два рекомендованных режима — «2» и «5», и только у них `star`;
 * у каждого из 23 режимов заполнено поле `when` («когда уместен»);
 * рекомендуемые и экспертные режимы разбивают реестр без потерь и пересечений;
 * режим по умолчанию не зависит от LLM и не является answer-режимом — базовый
@@ -17,15 +17,15 @@ from astro_app.menu import format_modes_menu
 from astro_app.modes import DEFAULT_MODE, MODES, RECOMMENDED_MODES, expert_modes, recommended_modes
 
 
-def test_default_mode_is_measured_graph_mode():
-    """Default зафиксирован как режим 2 «Граф» (решение по данным H1-1)."""
+def test_default_mode_is_measured_bm25_ce_ru_mode():
+    """Default зафиксирован как режим 5 «BM25+CE-ru» (решение владельца 04.11.2026)."""
     assert DEFAULT_MODE == "5"
     assert DEFAULT_MODE in MODES
     assert MODES[DEFAULT_MODE].label == "BM25+CE-ru"
 
 
-def test_recommended_modes_are_one_and_two():
-    """Ровно два рекомендованных режима: 1 (качество) и 2 (скорость)."""
+def test_recommended_modes_are_graph_and_bm25_ce_ru():
+    """Ровно два рекомендованных режима: 2 «Граф» (графовый поиск) и 5 «BM25+CE-ru»."""
     assert RECOMMENDED_MODES == ("2", "5")
     assert set(RECOMMENDED_MODES) <= set(MODES)
 
