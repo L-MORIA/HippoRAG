@@ -3,7 +3,25 @@
 Перенос из main.py (шаг 5 миграции MAIN_SPLIT_PLAN.md) — тела извлечены
 байт-в-байт (849-919, 922, 1012-1020, 1524-1589); глобальные синглтоны
 (_CROSS_ENCODER, _E5_MODEL, _COLBERT*) переезжают вместе с функциями.
+
+Деградация RU cross-encoder (аудит 04.11.2026, Н-3). Режим 5 «BM25+CE-ru» —
+режим по умолчанию, и его измеренное качество (recall@5 стр 65,0 %,
+page-MRR 0,520) получено **именно с переранком**. Если модель недоступна,
+раньше выдача молча возвращалась в исходном порядке: пользователь видел
+«рабочий» результат заведомо худшего качества и не знал об этом. Теперь
+деградация объявляется явно:
+
+* предупреждение уходит в **stderr** (stdout — это выдача, её читают),
+  и в нём сказано, что переранк не выполнен и почему;
+* причина доступна программно — `crossencoder_ru_unavailable_reason()`;
+* в строгом режиме (`HIPPORAG_REQUIRE_CROSSENCODER=1`) вместо деградации
+  вызывается исключение: режим по умолчанию не имеет права молча выдать
+  результат хуже измеренного.
 """
+
+import os
+import sys
+from typing import Optional
 
 import numpy as np
 
@@ -11,6 +29,35 @@ from hipporag.utils.misc_utils import min_max_normalize
 
 _CROSS_ENCODER = None
 _CROSS_ENCODER_RU = None
+
+#: Причина недоступности RU cross-encoder (None — неизвестна/не было отказа).
+_CROSSENCODER_RU_UNAVAILABLE_REASON: Optional[str] = None
+
+#: Что делать при недоступном RU cross-encoder: «degrade» (по умолчанию) или
+#: «strict» — падать. Задаётся переменной окружения, чтобы деградацию можно
+#: было запретить там, где качество важнее доступности.
+STRICT_ENV_VAR = "HIPPORAG_REQUIRE_CROSSENCODER"
+
+
+def crossencoder_ru_unavailable_reason() -> Optional[str]:
+    """Причина, по которой RU cross-encoder не удалось применить.
+
+    ``None`` — переранк ещё не пытались сделать или он удался. Непустая строка —
+    переранк **не выполнен**, выдача отдана в исходном порядке, и её качество
+    ниже измеренного для режима 5.
+    """
+    return _CROSSENCODER_RU_UNAVAILABLE_REASON
+
+
+def reset_crossencoder_ru_state() -> None:
+    """Сбросить состояние деградации (тесты, повторная попытка загрузки)."""
+    global _CROSSENCODER_RU_UNAVAILABLE_REASON
+    _CROSSENCODER_RU_UNAVAILABLE_REASON = None
+
+
+def strict_crossencoder() -> bool:
+    """Включён ли строгий режим: падать вместо деградации."""
+    return os.getenv(STRICT_ENV_VAR, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _get_crossencoder():
@@ -53,7 +100,23 @@ def _rerank_with_crossencoder_ru(query, candidates):
         reranked.sort(key=lambda x: x[1], reverse=True)
         return reranked
     except Exception as e:
-        print(f"  \u26a0\ufe0f Русский Cross-encoder недоступен ({e})")
+        global _CROSSENCODER_RU_UNAVAILABLE_REASON
+        _CROSSENCODER_RU_UNAVAILABLE_REASON = f"{type(e).__name__}: {e}"
+        if strict_crossencoder():
+            raise RuntimeError(
+                "Русский cross-encoder недоступен, а включён строгий режим "
+                f"({STRICT_ENV_VAR}=1): {_CROSSENCODER_RU_UNAVAILABLE_REASON}"
+            ) from e
+        print(
+            "  \u26a0\ufe0f Русский Cross-encoder недоступен \u2014 ПЕРЕРАНК НЕ ВЫПОЛНЕН, "
+            "выдача отдана в исходном (BM25 + embedding) порядке.\n"
+            f"     Причина: {_CROSSENCODER_RU_UNAVAILABLE_REASON}\n"
+            "     Качество ниже измеренного для режима 5 (recall@5 стр 65,0 %, "
+            "page-MRR 0,520): поставьте модель DiTy/cross-encoder-russian-msmarco "
+            "или выберите режим 2 \u00abГраф\u00bb.",
+            file=sys.stderr,
+            flush=True,
+        )
         return candidates
 
 
@@ -78,7 +141,11 @@ def _rerank_with_crossencoder(query, candidates):
         reranked.sort(key=lambda x: x[1], reverse=True)
         return reranked
     except Exception as e:
-        print(f"  \u26a0\ufe0f Cross-encoder недоступен ({e}), используется исходный порядок")
+        print(
+            f"  \u26a0\ufe0f Cross-encoder недоступен — ПЕРЕРАНК НЕ ВЫПОЛНЕН, выдача в исходном порядке ({e})",
+            file=sys.stderr,
+            flush=True,
+        )
         return candidates
 
 

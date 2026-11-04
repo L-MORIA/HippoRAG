@@ -13,6 +13,7 @@ from .evaluation.qa_eval import QAExactMatch, QAF1Score
 from .evaluation.retrieval_eval import RetrievalRecall
 from .llm import BaseLLM, _get_llm_class
 from .prompts.linking import get_query_instruction
+from .prompts.prompt_template_manager import PromptTemplateManager
 from .utils.config_utils import BaseConfig, build_working_dir
 from .utils.custom_types import QuerySolution
 from .utils.misc_utils import min_max_normalize
@@ -70,6 +71,13 @@ class StandardRAG:
             os.makedirs(self.working_dir, exist_ok=True)
 
         self.llm_model: BaseLLM = _get_llm_class(self.global_config)
+
+        # Менеджер шаблонов промптов нужен для qa()/rag_qa(). Раньше атрибут не
+        # создавался, и любой вызов QA падал с AttributeError (аудит 04.11.2026,
+        # R-1). Инициализация — как в HippoRAG.
+        self.prompt_template_manager = PromptTemplateManager(
+            role_mapping={"system": "system", "user": "user", "assistant": "assistant"}
+        )
 
         if self.global_config.openie_mode == "offline":
             self.embedding_model = None
@@ -172,7 +180,6 @@ class StandardRAG:
         retrieval_results = []
 
         for q_idx, query in tqdm(enumerate(queries), desc="Retrieving", total=len(queries)):
-            logger.info("No facts found after reranking, return DPR results")
             sorted_doc_ids, sorted_doc_scores = self.dense_passage_retrieval(query)
 
             top_k_docs = [
@@ -396,8 +403,8 @@ class StandardRAG:
     def get_query_embeddings(self, queries: List[str] | List[QuerySolution]):
         """
         Retrieves embeddings for given queries and updates the internal query-to-embedding mapping. The method determines whether each query
-        is already present in the `self.query_to_embedding` dictionary under the keys 'triple' and 'passage'. If a query is not present in
-        either, it is encoded into embeddings using the embedding model and stored.
+        is already present in the `self.query_to_embedding` dictionary under the key 'passage'. If a query is not present in
+        it, it is encoded into embeddings using the embedding model and stored.
 
         Args:
             queries List[str] | List[QuerySolution]: A list of query strings or QuerySolution objects. Each query is checked for
@@ -406,15 +413,14 @@ class StandardRAG:
 
         all_query_strings = []
         for query in queries:
-            if isinstance(query, QuerySolution) and (
-                query.question not in self.query_to_embedding["triple"]
-                or query.question not in self.query_to_embedding["passage"]
-            ):
-                all_query_strings.append(query.question)
-            elif (
-                query not in self.query_to_embedding["triple"]
-                or query not in self.query_to_embedding["passage"]
-            ):
+            # StandardRAG работает только с эмбеддингами 'passage': под-словарь
+            # 'triple' не заполняется никем, поэтому его проверка делала условие
+            # истинным всегда и кэш не срабатывал — запросы перекодировались при
+            # каждом retrieve (аудит 04.11.2026, R-2).
+            if isinstance(query, QuerySolution):
+                if query.question not in self.query_to_embedding["passage"]:
+                    all_query_strings.append(query.question)
+            elif query not in self.query_to_embedding["passage"]:
                 all_query_strings.append(query)
 
         if len(all_query_strings) > 0:

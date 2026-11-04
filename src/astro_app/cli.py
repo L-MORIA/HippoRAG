@@ -14,6 +14,7 @@ from .display import show_results
 from .menu import default_mode_label, print_modes_menu
 from .modes import DEFAULT_MODE, MODES
 from .qa_cache import _qa_export_training, _qa_load, _qa_lookup, _qa_store
+from .rerankers import crossencoder_ru_unavailable_reason
 
 MODEL_OPTIONS = {
     "1": ("google/gemma-4-e4b", "Gemma-4 ~9B активных (текущая)"),
@@ -131,6 +132,18 @@ def main():
         reformulated = None
         hyde_text = None
         result = spec.fn(hipporag, query)
+        # Деградация переранка объявляется на уровне режима: пользователь должен
+        # знать, что выдача хуже измеренной, а не делать из неё вывод о качестве
+        # режима (аудит 04.11.2026, Н-3).
+        degraded = crossencoder_ru_unavailable_reason()
+        if degraded:
+            print(
+                f"  ⚠️ Режим {mode} «{spec.label}»: ПЕРЕРАНК НЕ ВЫПОЛНЕН "
+                f"(cross-encoder недоступен: {degraded}). "
+                "Качество выдачи ниже измеренного для этого режима.",
+                file=sys.stderr,
+                flush=True,
+            )
         if spec.extra:
             results, extra = result
             if mode == "1":

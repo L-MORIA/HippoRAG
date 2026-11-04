@@ -55,16 +55,20 @@ def test_classify_latency():
 
 
 def test_evaluate_mode_marks_default_violation():
-    """Режим 1 (p95 12,8 с) нарушает бюджет режима по умолчанию."""
+    """Режим с p95 выше 10 с нарушает бюджет режима по умолчанию (режим 5)."""
     verdict = perf.evaluate_mode(_summary("1", "Multi-vector", 6_200, 12_800))
     assert verdict["role"] == perf.ROLE_LLM
     assert verdict["status"] == perf.STATUS_OK  # для LLM-режима 30 с — уложился
 
     verdict = perf.evaluate_mode(_summary("2", "Граф", 545, 11_000))
     assert verdict["role"] == perf.ROLE_EXPERT  # режим 2 больше не default
-    # default теперь режим 5 — проверяем violation на нём
+    assert verdict["status"] == perf.STATUS_OK  # экспертный бюджет 30 с — уложился
+
+    # default — режим 5: тот же p95 11 с уже нарушает бюджет default (10 с)
     verdict5 = perf.evaluate_mode(_summary("5", "BM25+CE-ru", 545, 11_000))
     assert verdict5["role"] == perf.ROLE_DEFAULT
+    assert verdict5["status"] == perf.STATUS_OVER_BUDGET
+    assert verdict5["margin_ms"] == -1_000  # 10 000 − 11 000
 
 
 def test_evaluate_budgets_splits_violations_and_experimental():
@@ -93,10 +97,10 @@ def test_unknown_p95_is_not_a_violation():
 
 def test_format_budget_table_has_all_modes():
     verdicts = perf.evaluate_budgets(
-        [_summary("5", "Граф", 545, 5_000), _summary("12", "Self-RAG", 23_800, 37_900)]
+        [_summary("5", "BM25+CE-ru", 545, 5_000), _summary("12", "Self-RAG", 23_800, 37_900)]
     )["modes"]
     table = perf.format_budget_table(verdicts)
-    assert "Граф" in table
+    assert "BM25+CE-ru" in table
     assert "Self-RAG" in table
     assert "experimental" in table
     # заголовок + разделитель + по строке на режим
@@ -114,11 +118,13 @@ def test_repo_baseline_snapshot_is_consistent():
     assert by_mode["12"]["status"] == perf.STATUS_EXPERIMENTAL
     assert by_mode["19"]["status"] == perf.STATUS_EXPERIMENTAL
     assert by_mode["21"]["status"] == perf.STATUS_OK
-    # p95 режима по умолчанию измерен живым прогоном (661 мс) — укладывается в 10 с.
-    assert by_mode["2"]["status"] == perf.STATUS_OK
-    # режим 5 (BM25 + RU cross-encoder) замерен: 225 мс p95, лучший по качеству.
+    # режим 5 (BM25 + RU cross-encoder) — режим по умолчанию: p95 225 мс,
+    # измерен живым прогоном, укладывается в бюджет default (10 с)
     assert by_mode["5"]["status"] == perf.STATUS_OK
     assert by_mode["1"]["status"] == perf.STATUS_OK
+    # роль default у режима 5, а не у режима 2
+    assert perf.mode_role("5") == perf.ROLE_DEFAULT
+    assert perf.mode_role("2") == perf.ROLE_EXPERT
 
 
 def test_menu_marks_experimental_modes():

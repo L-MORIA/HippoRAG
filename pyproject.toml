@@ -67,6 +67,10 @@ ru = [
 offline = [
     # Offline-режим OpenIE отключён в этой сборке; extra — для будущей реанимации
     "vllm>=0.6.6",
+    # outlines нужен бэкенду hipporag.llm.transformers_offline (guided-декодирование):
+    # без него «pip install по декларации» не даёт работоспособный Transformers-LLM
+    # (аудит 04.11.2026, S-3).
+    "outlines>=0.0.46",
 ]
 dev = [
     "pytest>=7.4.0",

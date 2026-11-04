@@ -1,6 +1,6 @@
 {
   "generated_at": "2026-11-04T16:46:07",
-  "provenance": "слияние снимков: режимы из последнего прогона заменяют одноимённые, остальные сохранены; сырые отчёты лежат вне репозитория (outputs/ в .gitignore)",
+  "provenance": "слияние снимков трёх прогонов: режимы из последнего прогона заменяют одноимённые, остальные сохранены; у каждого режима своё происхождение (measured_at/source), сырые отчёты лежат вне репозитория (outputs/ в .gitignore)",
   "index": "outputs/astrology_test",
   "dataset": {
     "path": "eval\\dataset\\questions.jsonl",
@@ -19,6 +19,8 @@
   "modes": {
     "1": {
       "label": "Multi-vector",
+      "measured_at": "2026-11-03",
+      "source": "outputs/reports/eval_after_llm.json",
       "p50_ms": 6152.8,
       "p95_ms": 12807.07,
       "retrieval_p50_ms": 2555.3,
@@ -27,10 +29,15 @@
       "recall@k_doc": 0.975,
       "mrr@k_doc": 0.9208,
       "ndcg@k_doc": 0.9348,
-      "adequacy_mean": null
+      "adequacy_mean": null,
+      "recall@k_page": 0.275,
+      "mrr@k_page": 0.161,
+      "ndcg@k_page": null
     },
     "12": {
       "label": "Self-RAG",
+      "measured_at": "2026-11-03",
+      "source": "outputs/reports/eval_after_llm.json",
       "p50_ms": 23804.5,
       "p95_ms": 37936.925,
       "retrieval_p50_ms": 2566.35,
@@ -39,10 +46,15 @@
       "recall@k_doc": null,
       "mrr@k_doc": null,
       "ndcg@k_doc": null,
-      "adequacy_mean": 0.7535
+      "adequacy_mean": 0.7535,
+      "recall@k_page": null,
+      "mrr@k_page": null,
+      "ndcg@k_page": null
     },
     "19": {
       "label": "GraphRAG",
+      "measured_at": "2026-11-03",
+      "source": "outputs/reports/eval_after_llm.json",
       "p50_ms": 16605.35,
       "p95_ms": 32954.265,
       "retrieval_p50_ms": 2650.35,
@@ -51,10 +63,15 @@
       "recall@k_doc": null,
       "mrr@k_doc": null,
       "ndcg@k_doc": null,
-      "adequacy_mean": 0.6667
+      "adequacy_mean": 0.6667,
+      "recall@k_page": null,
+      "mrr@k_page": null,
+      "ndcg@k_page": null
     },
     "21": {
       "label": "DAT+LLM",
+      "measured_at": "2026-11-03",
+      "source": "outputs/reports/eval_after_llm.json",
       "p50_ms": 21097.35,
       "p95_ms": 29403.655,
       "retrieval_p50_ms": 447.9,
@@ -63,10 +80,15 @@
       "recall@k_doc": null,
       "mrr@k_doc": null,
       "ndcg@k_doc": null,
-      "adequacy_mean": 0.8125
+      "adequacy_mean": 0.8125,
+      "recall@k_page": null,
+      "mrr@k_page": null,
+      "ndcg@k_page": null
     },
     "2": {
       "label": "Граф",
+      "measured_at": "2026-11-04",
+      "source": "outputs/reports/eval_after_mode2.json",
       "p50_ms": 544.55,
       "p95_ms": 661.16,
       "retrieval_p50_ms": 544.55,
@@ -75,10 +97,15 @@
       "recall@k_doc": 0.95,
       "mrr@k_doc": 0.9125,
       "ndcg@k_doc": 0.928,
-      "adequacy_mean": null
+      "adequacy_mean": null,
+      "recall@k_page": 0.6,
+      "mrr@k_page": 0.477,
+      "ndcg@k_page": null
     },
     "5": {
       "label": "BM25+CE-ru",
+      "measured_at": "2026-11-04",
+      "source": "outputs/reports/eval_mode5.json",
       "p50_ms": 197.3,
       "p95_ms": 225.46,
       "retrieval_p50_ms": 197.3,
@@ -87,11 +114,16 @@
       "recall@k_doc": 0.975,
       "mrr@k_doc": 0.9021,
       "ndcg@k_doc": 0.9206,
-      "adequacy_mean": null
+      "adequacy_mean": null,
+      "recall@k_page": 0.65,
+      "mrr@k_page": 0.52,
+      "ndcg@k_page": null
     }
   },
   "merged_at": "2026-11-04T16:46:07",
   "merged_modes": [
     "5"
-  ]
+  ],
+  "top_level_scope": "index/dataset/llm/n_questions описывают ПОСЛЕДНИЙ прогон; у каждого режима своё происхождение — modes.<id>.measured_at и modes.<id>.source",
+  "measured_at_precision": "measured_at — дата сессии замера (время дня в исходных отчётах не зафиксировано); source — путь к сырому отчёту вне репозитория (outputs/ в .gitignore)"
 }

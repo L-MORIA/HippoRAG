@@ -17,10 +17,10 @@
 | # | Находка аудита от 31.10 | Статус | Подтверждение |
 |---|---|---|---|
 | **S-1** | 🔴 NameError в `StandardRAG.__init__` (`embedding_base_url` не в сигнатуре) → падение любой конструкции | ✅ **закрыто** | блок удалён целиком; конструкция проверена живьём; есть тест `tests/unit/test_core_utils.py:155` |
-| **S-2** | 🟠 `import hipporag.StandardRAG` падает без vllm (модульный импорт `openie_vllm_offline`) | ✅ **закрыто** | импорт убран из `StandardRAG`; в `HippoRAG.py:18–26` обёрнут в `try/except ImportError`; vllm — в extra `offline`. Живьём: пакет, `StandardRAG`, `HippoRAG` импортируются без vllm |
+| **S-2** | 🟠 `import hipporag.StandardRAG` падает без vllm (модульный импорт `openie_vllm_offline`) | ✅ **закрыто** | импорт убран из `StandardRAG`; в `HippoRAG.py:19–26` обёрнут в `try/except ImportError`; vllm — в extra `offline`. Живьём: пакет, `StandardRAG`, `HippoRAG` импортируются без vllm |
 | **S-3** | 🟠 необъявленные зависимости (`outlines`, `sentence-transformers`) | ⚠️ **частично** | `sentence-transformers>=2.2.0` добавлен (`pyproject.toml:35`), `pip install -e ".[dev]"` работает; `outlines` **по-прежнему не объявлен** (§3.3) |
 | **S-4** | 🟠 баги `transformers_offline` (decode-спан, free-form batch, `max_tokens`) | ❌ **откатилось** | файл вернулся в до-аудитное состояние; смягчается отключением offline-OpenIE и guarded-импортами (§3.4) |
-| **S-5** | 🟡 rerank: misleading-лог, фолбэк пустыми списками | ✅ **закрыто и улучшено** | настоящий fallback к порядку скоростей (`rerank.py:155–159`), лог честный (§3.5) |
+| **S-5** | 🟡 rerank: misleading-лог, фолбэк пустыми списками | ✅ **закрыто и улучшено** | настоящий fallback к порядку скоростей (`rerank.py:163–166`), лог честный (§3.5) |
 | **S-6** | 🟢 форк отставал от upstream на 10 коммитов | ➖ **неактуально** | репо отсоединено от upstream-сети (`docs: record repo switch to private…`), развивается самостоятельно |
 | **S-7** | 🟢 отсутствие CI | ✅ **закрыто** | полный `ci-cd.yml`: lint + тесты (ubuntu+windows matrix) + eval-smoke + index-fixture; pre-commit; локально всё зелёное (§3.7) |
 
@@ -243,3 +243,40 @@ completion_tokens = 6                   # ожидалось 2
 - **Проверяемое состояние:** `origin/main` = `30f4304`, рабочая копия чистая.
 - **Воспроизведение статусов §3–§4:** import-пробы `python -c "import hipporag.StandardRAG"`; для R-1/R-2 — вызовы `StandardRAG.rag_qa`/`retrieve` со стабами `llm_model.infer` и `embedding_model.batch_encode`; для R-3 — `TransformersLLM.__new__` + стабы токенизатора/модели/кэша; выводы по коду — построчный разбор `StandardRAG.py`, `rerank.py`, `llm/transformers_llm.py`, `llm/transformers_offline.py`, `pyproject.toml` на коммите `30f4304`.
 - **Сопутствующие артефакты проверки** (вне репозитория): скрипты точечных проверок `verify_1104.py`, `verify_cache_1104.py`.
+
+---
+
+## Приложение 2: независимая проверка (2026-11-04, раунд 6)
+
+Документ проверен независимо — по коду на `main` = `7096208` (следом после
+`30f4304`) и **живыми пробами**, а не только по чтению. Итог: **все шесть
+находок подтверждены**, одна формулировка требует поправки.
+
+| Находка | Независимая проверка | Итог |
+|---|---|---|
+| **R-1** `StandardRAG.qa` → `AttributeError` | `StandardRAG.__init__` (строки 24–95) не создаёт `prompt_template_manager`, а `qa()` обращается к нему в строках 330 и 342; рабочий образец — `HippoRAG.py:185`. Живая проба: `AttributeError: 'StandardRAG' object has no attribute 'prompt_template_manager'` | **подтверждена** |
+| **R-2** мёртвый кэш эмбеддингов | `get_query_embeddings` (строки 407–426) проверяет наличие в `triple` и `passage`, а заполняет только `passage`; под-ключ `triple` не наполняет никто. Живая проба: `batch_encode` вызван 2 раза вместо 1 | **подтверждена** |
+| **R-3** `transformers_llm.infer` декодирует промпт+ответ | `transformers_llm.py:149–153`: `decode(response[0])` без отсечения по длине промпта. Живая проба: в message попали все 6 токенов вместо 2, `completion_tokens=6` вместо 2 | **подтверждена** |
+| **R-4** misleading-лог | `StandardRAG.py:175` — `logger.info('No facts found after reranking, return DPR results')` печатается **до** вызова переранка, то есть всегда | **подтверждена** |
+| **S-3** `outlines` не объявлен | `pyproject.toml` и `requirements.txt` не содержат `outlines`, а `llm/transformers_offline.py:3–4` импортирует `outlines.generate`/`outlines.models` на уровне модуля; в окружении пакет не установлен | **подтверждена** |
+| **S-4** `transformers_offline` откатился | `transformers_output[0]["generated_text"]` (строка 67), `max_tokens` вместо `max_new_tokens` (строки 92/98), безусловный `completion.model_dump_json()` (строка 101) | **подтверждена** |
+| **S-1, S-2, S-5, S-6, S-7** «закрыто» | Блок `embedding_base_url` удалён; импорты `vllm`/`outlines` защищены (`HippoRAG.py:19–26`), живой импорт `hipporag` без этих пакетов проходит; фолбэк реранка на месте (`rerank.py:146`, `163–166`) | **закрыто — подтверждено** |
+
+### Поправка к формулировке рецензии
+
+Утверждение «путь `main.py --rag_type standard` на этапе QA сломан» **к этому
+репозиторию не относится**: `main.py` — тонкий фасад над `astro_app.cli`,
+аргумента `--rag_type` в нём нет, а `StandardRAG` в продуктовом коде не
+используется (в пакете `hipporag` — только в `llm/__init__.py` и в докстринге
+`config_utils.py:308`).
+
+Это не уменьшает ценность R-1…R-4: это **реальные дефекты публичного API
+пакета `hipporag`** (`pip install hipporag` → `StandardRAG.qa()` падает с
+`AttributeError`). Но на **продуктовые пути astro_app** (HippoRAG / LM Studio)
+они не влияют: их влияние на пользователя продукта нулевое, а на
+`pip install hipporag` — прямое.
+
+### Что сделано по итогам проверки
+
+Правки R-1, R-2, R-3, R-4, S-3, S-4 внесены и покрыты регрессионными
+тестами; отчёт — `docs/AUDIT_RECHECK_FIX_2026-11-04.md`.
