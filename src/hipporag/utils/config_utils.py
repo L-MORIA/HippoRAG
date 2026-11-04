@@ -241,6 +241,10 @@ class BaseConfig:
     qa_top_k: int = field(
         default=5, metadata={"help": "Feeding top k documents to the QA model for reading."}
     )
+    qa_strict_grounding: bool = field(
+        default=True,
+        metadata={"help": "Если модель не сослалась ни на один фрагмент, заменить ответ на отказ."},
+    )
 
     # Save dir (highest level directory)
     save_dir: str = field(

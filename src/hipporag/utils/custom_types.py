@@ -29,6 +29,11 @@ class QuerySolution:
     answer: str = ""
     gold_answers: List[str] = None
     gold_docs: Optional[List[str]] = None
+    # H2-6: только те цитаты, на которые модель реально сослалась, плюс
+    # признаки отказа и ошибок заземления. Поля заполняет HippoRAG.qa().
+    used_citations: List[Citation] = None
+    abstained: bool = False
+    grounding_errors: List[str] = None
 
     def __post_init__(self):
         if self.docs is None:
@@ -37,11 +42,17 @@ class QuerySolution:
             self.doc_scores = []
         if self.citations is None:
             self.citations = []
+        if self.used_citations is None:
+            self.used_citations = []
+        if self.grounding_errors is None:
+            self.grounding_errors = []
 
     def to_dict(self):
         return {
             "question": self.question,
             "answer": self.answer,
+            "abstained": self.abstained,
+            "grounding_errors": self.grounding_errors,
             "gold_answers": self.gold_answers,
             "docs": list(self.docs)[:5],
             "doc_scores": (

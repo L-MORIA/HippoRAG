@@ -11,7 +11,7 @@ from hipporag.qa.grounding import (
     format_fragments,
     parse_grounded_response,
 )
-from hipporag.utils.custom_types import Citation
+from hipporag.utils.custom_types import Citation, QuerySolution
 
 
 def test_valid_answer_extracts_citation():
@@ -164,6 +164,22 @@ def test_empty_answer_abstains(raw):
 
     assert result.text == ABSTAIN_TEXT
     assert result.abstained is True
+
+
+def test_query_solution_has_grounding_defaults():
+    solution = QuerySolution(question="Что такое?")
+
+    assert solution.used_citations == []
+    assert solution.abstained is False
+    assert solution.grounding_errors == []
+    assert solution.to_dict()["abstained"] is False
+    assert solution.to_dict()["grounding_errors"] == []
+
+
+def test_config_has_strict_grounding_flag():
+    from hipporag.utils.config_utils import BaseConfig
+
+    assert BaseConfig().qa_strict_grounding is True
 
 
 def test_astrology_template_renders_grounded_contract():
