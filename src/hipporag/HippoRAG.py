@@ -546,6 +546,13 @@ class HippoRAG:
         """
         retrieve_start_time = time.time()  # Record start time
 
+        # QuerySolution — dataclass без __hash__: в кэше эмбеддингов он не
+        # хэшируется (TypeError: unhashable type), а весь путь ретрива работает
+        # со строкой. Приводим запросы к тексту вопроса (аудит 04.11.2026, N-3).
+        queries = [
+            query.question if isinstance(query, QuerySolution) else query for query in queries
+        ]
+
         if num_to_retrieve is None:
             num_to_retrieve = self.global_config.retrieval_top_k
 
@@ -754,6 +761,13 @@ class HippoRAG:
         - Long queries with no relevant facts after reranking will default to results from dense passage retrieval.
         """
         retrieve_start_time = time.time()  # Record start time
+
+        # QuerySolution — dataclass без __hash__: в кэше эмбеддингов он не
+        # хэшируется (TypeError: unhashable type), а весь путь ретрива работает
+        # со строкой. Приводим запросы к тексту вопроса (аудит 04.11.2026, N-3).
+        queries = [
+            query.question if isinstance(query, QuerySolution) else query for query in queries
+        ]
 
         if num_to_retrieve is None:
             num_to_retrieve = self.global_config.retrieval_top_k
@@ -1720,16 +1734,19 @@ class HippoRAG:
             self.prepare_retrieval_objects()
 
         # Get query embedding - try cache first, then compute if needed
+        # QuerySolution — dataclass без __hash__, в словаре кэша он не хэшируется
+        # (аудит 04.11.2026, N-3): работаем с текстом вопроса.
+        query_text = query.question if isinstance(query, QuerySolution) else query
         if (
             hasattr(self, "query_to_embedding")
             and "passage" in self.query_to_embedding
-            and query in self.query_to_embedding["passage"]
+            and query_text in self.query_to_embedding["passage"]
         ):
-            query_embedding = self.query_to_embedding["passage"][query]
+            query_embedding = self.query_to_embedding["passage"][query_text]
         else:
             # Compute directly if no cache
             query_embedding = self.embedding_model.batch_encode(
-                query, instruction=get_query_instruction("query_to_passage"), norm=True
+                query_text, instruction=get_query_instruction("query_to_passage"), norm=True
             )
         query_doc_scores = np.dot(self.passage_embeddings, query_embedding.T)
         query_doc_scores = (
@@ -1771,7 +1788,9 @@ class HippoRAG:
         sorted_doc_ids, sorted_doc_scores = self.dense_passage_retrieval(query)
 
         # Extract query terms for keyword matching
-        query_lower = query.lower()
+        # QuerySolution — dataclass без __hash__: дальше нужен текст (аудит 04.11.2026, N-3)
+        query_text = query.question if isinstance(query, QuerySolution) else query
+        query_lower = query_text.lower()
         query_terms = query_lower.split()
         # Remove common words that might not be informative
         important_terms = [term for term in query_terms if len(term) > 2]

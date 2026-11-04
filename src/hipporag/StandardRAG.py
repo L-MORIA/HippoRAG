@@ -166,6 +166,13 @@ class StandardRAG:
         """
         retrieve_start_time = time.time()  # Record start time
 
+        # QuerySolution — dataclass без __hash__: в кэше эмбеддингов он не
+        # хэшируется (TypeError: unhashable type), а весь путь ретрива работает
+        # со строкой. Приводим запросы к тексту вопроса (аудит 04.11.2026, N-3).
+        queries = [
+            query.question if isinstance(query, QuerySolution) else query for query in queries
+        ]
+
         if num_to_retrieve is None:
             num_to_retrieve = self.global_config.retrieval_top_k
 
@@ -431,7 +438,7 @@ class StandardRAG:
             for query, embedding in zip(all_query_strings, query_embeddings_for_passage):
                 self.query_to_embedding["passage"][query] = embedding
 
-    def dense_passage_retrieval(self, query: str) -> Tuple[np.ndarray, np.ndarray]:
+    def dense_passage_retrieval(self, query: str | QuerySolution) -> Tuple[np.ndarray, np.ndarray]:
         """
         Conduct dense passage retrieval to find relevant documents for a query.
 
@@ -444,7 +451,7 @@ class StandardRAG:
 
         Parameters
         ----------
-        query : str
+        query : str | QuerySolution
             The input query for which relevant passages should be retrieved.
 
         Returns
@@ -455,10 +462,14 @@ class StandardRAG:
             - A numpy array of the normalized similarity scores for the corresponding
               documents.
         """
-        query_embedding = self.query_to_embedding["passage"].get(query, None)
+        # QuerySolution — dataclass без __hash__, в словаре кэша он не хэшируется
+        # (TypeError: unhashable type). Искать и кодировать надо текст вопроса
+        # (аудит 04.11.2026, N-3).
+        query_text = query.question if isinstance(query, QuerySolution) else query
+        query_embedding = self.query_to_embedding["passage"].get(query_text, None)
         if query_embedding is None:
             query_embedding = self.embedding_model.batch_encode(
-                query, instruction=get_query_instruction("query_to_passage"), norm=True
+                query_text, instruction=get_query_instruction("query_to_passage"), norm=True
             )
         query_doc_scores = np.dot(self.passage_embeddings, query_embedding.T)
         query_doc_scores = (

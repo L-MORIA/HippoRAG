@@ -260,7 +260,8 @@ def test_transformers_offline_decodes_only_completion():
         encoding="utf-8"
     )
     assert 'transformers_output[0]["generated_text"]' not in source
-    assert "len(input_ids) :" in source, "декодируется весь вывод, а не только завершение"
+    # декодируется только сгенерированная часть — срез по длине входа
+    assert "input_ids.shape[1] :" in source, "декодируется весь вывод, а не только завершение"
     # generate() получает токенизированные входы и max_new_tokens, а не строки и max_tokens
     assert "self.model.generate(**encoded, max_new_tokens=max_tokens)" in source
     assert "self.model.generate(all_prompt_texts" not in source

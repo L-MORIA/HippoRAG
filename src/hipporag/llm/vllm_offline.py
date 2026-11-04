@@ -87,8 +87,11 @@ class VLLMOffline:
 
     def infer(self, messages: List[TextChatMessage], max_tokens=2048):
         logger.info(f"Calling VLLM offline, # of messages {len(messages)}")
-        messages_list = [messages]
-        prompt_ids = convert_text_chat_messages_to_input_ids(messages_list, self.tokenizer)
+        # vLLM ждёт батч промптов (список списков id), поэтому разговор
+        # оборачивается в список из одного элемента — в отличие от
+        # transformers-бэкенда, где такая обёртка ломала tokenizer.encode()
+        # (аудит 04.11.2026, N-1).
+        prompt_ids = convert_text_chat_messages_to_input_ids([messages], self.tokenizer)
 
         vllm_output = self.client.generate(
             prompt_token_ids=prompt_ids,
@@ -98,7 +101,9 @@ class VLLMOffline:
         prompt_tokens = len(vllm_output[0].prompt_token_ids)
         completion_tokens = len(vllm_output[0].outputs[0].token_ids)
         metadata = {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens}
-        return response, metadata
+        # Контракт BaseLLM.infer — тройка (контент, метаданные, признак кэша);
+        # у offline-бэкенда кэша нет (аудит 04.11.2026, N-4).
+        return response, metadata, False
 
     def batch_infer(
         self, messages_list: List[List[TextChatMessage]], max_tokens=2048, json_template=None
