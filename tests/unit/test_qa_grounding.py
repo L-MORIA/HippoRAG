@@ -1,7 +1,10 @@
-"""Тесты контракта заземления Q&A (H2-6, шаг 1).
+"""Тесты контракта заземления Q&A (H2-6).
 
 Проверяем чистый парсер без LLM и индекса: ссылки, отказ, code fences,
-старый формат и защиту от «ответа без доказательства».
+старый формат и защиту от «ответа без доказательства». Интеграционная часть
+ниже собирает ``HippoRAG`` без ``__init__`` (без моделей и индекса), чтобы
+проверить, что ``qa()`` не зовёт LLM без контекста и сохраняет только
+использованные цитаты.
 """
 
 import pytest
@@ -180,6 +183,111 @@ def test_config_has_strict_grounding_flag():
     from hipporag.utils.config_utils import BaseConfig
 
     assert BaseConfig().qa_strict_grounding is True
+
+
+class _StubLLM:
+    """LLM-заглушка: отдаёт заранее заданные ответы и считает вызовы."""
+
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = 0
+        self.messages = []
+
+    def infer(self, messages, **kwargs):  # noqa: ARG002
+        self.messages.append(messages)
+        response = self.responses[self.calls]
+        self.calls += 1
+        return response, {"prompt_tokens": 1}, False
+
+
+def _make_hipporag_stub():
+    """HippoRAG без __init__: только то, что нужно ``qa()``."""
+    from hipporag.HippoRAG import HippoRAG
+    from hipporag.prompts.prompt_template_manager import PromptTemplateManager
+    from hipporag.utils.config_utils import BaseConfig
+
+    rag = HippoRAG.__new__(HippoRAG)
+    rag.global_config = BaseConfig()
+    rag.global_config.dataset = "astrology"
+    rag.global_config.qa_top_k = 5
+    rag.global_config.qa_strict_grounding = True
+    rag.prompt_template_manager = PromptTemplateManager()
+    return rag
+
+
+def test_hipporag_qa_skips_llm_on_empty_context():
+    rag = _make_hipporag_stub()
+    rag.llm_model = _StubLLM([])
+
+    solutions = [QuerySolution(question="Что такое?", docs=[])]
+    out_solutions, messages, metadata = rag.qa(solutions)
+
+    assert rag.llm_model.calls == 0
+    assert out_solutions[0].answer == ABSTAIN_TEXT
+    assert out_solutions[0].abstained is True
+    assert out_solutions[0].used_citations == []
+    assert len(messages) == len(metadata) == 1
+
+
+def test_hipporag_qa_keeps_only_used_citations():
+    rag = _make_hipporag_stub()
+    first = Citation(source_file="a.pdf", doc_title="Книга A", page_num=1)
+    second = Citation(source_file="b.pdf", doc_title="Книга B", page_num=2)
+    rag.llm_model = _StubLLM(
+        ["ОТВЕТ: Прибор работает от батареи AA [1].\nИСТОЧНИКИ: 1\nОТКАЗ: нет"]
+    )
+
+    solution = QuerySolution(
+        question="От чего работает прибор?",
+        docs=["фрагмент один", "фрагмент два"],
+        citations=[first, second],
+    )
+    out_solutions, messages, _ = rag.qa([solution])
+
+    assert rag.llm_model.calls == 1
+    assert out_solutions[0].used_citations == [first]
+    assert out_solutions[0].abstained is False
+    assert out_solutions[0].grounding_errors == []
+    assert out_solutions[0].answer == "Прибор работает от батареи AA [1]."
+    assert "[1] Источник: Книга A, стр. 1" in rag.llm_model.messages[0][-1]["content"]
+
+
+def test_hipporag_qa_abstains_when_model_ignores_citations():
+    rag = _make_hipporag_stub()
+    rag.llm_model = _StubLLM(["ОТВЕТ: Прибор работает от батареи AA.\nИСТОЧНИКИ:\nОТКАЗ: нет"])
+
+    solution = QuerySolution(
+        question="От чего работает прибор?",
+        docs=["Прибор «Альфа» работает от батареи AA."],
+        citations=[Citation(source_file="a.pdf", doc_title="Книга A", page_num=1)],
+    )
+    out_solutions, _, _ = rag.qa([solution])
+
+    assert out_solutions[0].answer == ABSTAIN_TEXT
+    assert out_solutions[0].abstained is True
+    assert "no_inline_citations" in out_solutions[0].grounding_errors
+    assert out_solutions[0].used_citations == []
+
+
+def test_hipporag_qa_mixed_batch_keeps_alignment():
+    rag = _make_hipporag_stub()
+    rag.llm_model = _StubLLM(
+        ["ОТВЕТ: Прибор работает от батареи AA [1].\nИСТОЧНИКИ: 1\nОТКАЗ: нет"]
+    )
+
+    empty = QuerySolution(question="Первый?", docs=[])
+    answerable = QuerySolution(
+        question="Второй?",
+        docs=["Прибор «Альфа» работает от батареи AA."],
+        citations=[Citation(source_file="a.pdf", doc_title="Книга A", page_num=1)],
+    )
+    out_solutions, messages, metadata = rag.qa([empty, answerable])
+
+    assert rag.llm_model.calls == 1
+    assert len(messages) == len(metadata) == 2
+    assert out_solutions[0].answer == ABSTAIN_TEXT
+    assert out_solutions[1].abstained is False
+    assert out_solutions[1].used_citations == [answerable.citations[0]]
 
 
 def test_astrology_template_renders_grounded_contract():

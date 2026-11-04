@@ -28,6 +28,12 @@ from .evaluation.qa_eval import QAExactMatch, QAF1Score
 from .evaluation.retrieval_eval import RetrievalRecall
 from .prompts.linking import get_query_instruction
 from .prompts.prompt_template_manager import PromptTemplateManager
+from .qa.grounding import (
+    ABSTAIN_TEXT,
+    GroundedAnswer,
+    format_fragments,
+    parse_grounded_response,
+)
 from .rerank import DSPyFilter
 from .utils.config_utils import BaseConfig, build_working_dir
 from .utils.custom_types import QuerySolution
@@ -930,38 +936,28 @@ class HippoRAG:
                 - A list of raw response messages from the language model.
                 - A list of metadata dictionaries associated with the results.
         """
-        # Running inference for QA
-        all_qa_messages = []
+        # Running inference for QA. Пустой контекст не доходит до LLM:
+        # без фрагментов нет доказательства, поэтому сразу фиксируем отказ.
+        all_qa_messages: List[Optional[List[Dict]]] = []
+        all_fragment_counts: List[int] = []
 
         for query_solution in tqdm(queries, desc="Collecting QA prompts"):
-            # obtain the retrieved docs
             retrieved_passages = query_solution.docs[: self.global_config.qa_top_k]
+            all_fragment_counts.append(len(retrieved_passages))
 
-            # Build prompt with citation information if available
-            prompt_user = ""
+            if not retrieved_passages:
+                all_qa_messages.append(None)
+                continue
+
             citations = list(query_solution.citations)[: self.global_config.qa_top_k]
-            if citations:
-                # Include citations in the prompt (Russian format for astrology)
-                if len(citations) != len(retrieved_passages):
-                    logger.warning(
-                        f"QA: число цитат ({len(citations)}) не совпадает с числом фрагментов "
-                        f"({len(retrieved_passages)}) — часть фрагментов попадёт в промпт без источника"
-                    )
-                for i, passage in enumerate(retrieved_passages):
-                    citation = citations[i] if i < len(citations) else None
-                    if citation is not None:
-                        prompt_user += f"Фрагмент {i+1} (Источник: {citation.doc_title}, Стр: {citation.page_num}"
-                        if citation.section:
-                            prompt_user += f", Секция: {citation.section}"
-                        prompt_user += f"):\n{passage}\n\n"
-                    else:
-                        prompt_user += f"Фрагмент {i+1}:\n{passage}\n\n"
-            else:
-                # Fallback to original format
-                for i, passage in enumerate(retrieved_passages, 1):
-                    prompt_user += f"Фрагмент {i}:\n{passage}\n\n"
+            if citations and len(citations) != len(retrieved_passages):
+                logger.warning(
+                    f"QA: число цитат ({len(citations)}) не совпадает с числом фрагментов "
+                    f"({len(retrieved_passages)}) — часть фрагментов попадёт в промпт без источника"
+                )
 
-            prompt_user += "Вопрос: " + query_solution.question + "\nМысли: "
+            prompt_user = format_fragments(retrieved_passages, citations)
+            prompt_user += "\n\nВопрос: " + query_solution.question + "\n"
 
             if self.prompt_template_manager.is_template_name_valid(
                 name=f"rag_qa_{self.global_config.dataset}"
@@ -980,38 +976,49 @@ class HippoRAG:
                 )
             )
 
+        pending = [(index, message) for index, message in enumerate(all_qa_messages) if message]
         all_qa_results = [
-            self.llm_model.infer(qa_messages)
-            for qa_messages in tqdm(all_qa_messages, desc="QA Reading")
+            self.llm_model.infer(message) for _, message in tqdm(pending, desc="QA Reading")
         ]
 
-        all_response_message, all_metadata, all_cache_hit = zip(*all_qa_results)
-        all_response_message, all_metadata = list(all_response_message), list(all_metadata)
-        cache_hits = sum(1 for hit in all_cache_hit if hit)
-        logger.info(f"LLM cache: {cache_hits}/{len(all_cache_hit)} hits")
+        all_response_message: List[str] = [""] * len(queries)
+        all_metadata: List[Dict] = [{} for _ in queries]
+        cache_hit_flags = [False] * len(queries)
+        for (index, _), (response, metadata, cache_hit) in zip(pending, all_qa_results):
+            all_response_message[index] = response
+            all_metadata[index] = metadata
+            cache_hit_flags[index] = cache_hit
+
+        cache_hits = sum(1 for hit in cache_hit_flags if hit)
+        logger.info(f"LLM cache: {cache_hits}/{len(cache_hit_flags)} hits")
 
         # Process responses and extract predicted answers.
         queries_solutions = []
+        strict = self.global_config.qa_strict_grounding
         for query_solution_idx, query_solution in tqdm(
             enumerate(queries), desc="Extraction Answers from LLM Response"
         ):
-            response_content = all_response_message[query_solution_idx]
-            try:
-                # Try Russian format first
-                if "Ответ:" in response_content:
-                    pred_ans = response_content.split("Ответ:")[1].strip()
-                # Fallback to English format
-                elif "Answer:" in response_content:
-                    pred_ans = response_content.split("Answer:")[1].strip()
-                else:
-                    pred_ans = response_content
-            except Exception as e:
-                logger.warning(
-                    f"Error in parsing the answer from the raw LLM QA inference response: {str(e)}!"
+            if all_qa_messages[query_solution_idx] is None:
+                grounded = GroundedAnswer(text=ABSTAIN_TEXT, abstained=True)
+                all_response_message[query_solution_idx] = ABSTAIN_TEXT
+            else:
+                grounded = parse_grounded_response(
+                    all_response_message[query_solution_idx],
+                    fragment_count=all_fragment_counts[query_solution_idx],
+                    strict=strict,
                 )
-                pred_ans = response_content
 
-            query_solution.answer = pred_ans
+            query_solution.answer = grounded.text
+            query_solution.abstained = grounded.abstained
+            query_solution.grounding_errors = grounded.errors
+
+            citations = list(query_solution.citations)[: self.global_config.qa_top_k]
+            query_solution.used_citations = [
+                citations[citation_id - 1]
+                for citation_id in grounded.used_citation_ids
+                if 1 <= citation_id <= len(citations)
+            ]
+
             queries_solutions.append(query_solution)
 
         return queries_solutions, all_response_message, all_metadata
