@@ -1,12 +1,11 @@
 from typing import List
 
-import outlines.generate as generate
-import outlines.models as models
 import torch.cuda
 
 from ..utils.llm_utils import TextChatMessage, get_pydantic_model
 from ..utils.logging_utils import get_logger
 from .base import LLMConfig
+from .outlines_compat import build_guided_generator
 
 logger = get_logger(__name__)
 
@@ -95,12 +94,16 @@ class TransformersOffline:
 
         if json_template is not None:
             guided_json = get_pydantic_model(json_template)
-            outlines_model = models.Transformers(self.model, self.tokenizer)
-            generator = generate.json(outlines_model, guided_json)
+            # `outlines` подключается лениво (внутри `build_guided_generator`):
+            # без него модуль бэкенда всё равно должен импортироваться —
+            # guided-декодирование единственный потребитель пакета
+            # (аудит 04.11.2026, раунд 8).
+            guided_generator = build_guided_generator(self.model, self.tokenizer, guided_json)
             transformers_outputs = []
             for i in range(0, len(all_prompt_texts), 4):
-                transformers_output = generator(all_prompt_texts[i : i + 4], max_tokens=max_tokens)
-                transformers_outputs.extend(transformers_output)
+                transformers_outputs.extend(
+                    guided_generator(all_prompt_texts[i : i + 4], max_tokens)
+                )
         else:
             transformers_outputs = []
             for i in range(0, len(all_prompt_texts), 4):
