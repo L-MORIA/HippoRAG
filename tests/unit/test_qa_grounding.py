@@ -290,6 +290,38 @@ def test_hipporag_qa_mixed_batch_keeps_alignment():
     assert out_solutions[1].used_citations == [answerable.citations[0]]
 
 
+def _make_standard_rag_stub():
+    """StandardRAG без __init__: только то, что нужно ``qa()``."""
+    from hipporag.prompts.prompt_template_manager import PromptTemplateManager
+    from hipporag.StandardRAG import StandardRAG
+    from hipporag.utils.config_utils import BaseConfig
+
+    rag = StandardRAG.__new__(StandardRAG)
+    rag.global_config = BaseConfig()
+    rag.global_config.dataset = "astrology"
+    rag.global_config.qa_top_k = 5
+    rag.global_config.qa_strict_grounding = True
+    rag.prompt_template_manager = PromptTemplateManager()
+    return rag
+
+
+def test_standard_rag_qa_uses_same_strict_contract():
+    rag = _make_standard_rag_stub()
+    rag.llm_model = _StubLLM(["ОТВЕТ: Прибор работает от батареи AA.\nИСТОЧНИКИ:\nОТКАЗ: нет"])
+
+    solution = QuerySolution(
+        question="От чего работает прибор?",
+        docs=["Прибор «Альфа» работает от батареи AA."],
+        citations=[Citation(source_file="a.pdf", doc_title="Книга A", page_num=1)],
+    )
+    out_solutions, _, _ = rag.qa([solution])
+
+    assert out_solutions[0].answer == ABSTAIN_TEXT
+    assert out_solutions[0].abstained is True
+    assert "no_inline_citations" in out_solutions[0].grounding_errors
+    assert out_solutions[0].used_citations == []
+
+
 def test_astrology_template_renders_grounded_contract():
     from hipporag.prompts.prompt_template_manager import PromptTemplateManager
 

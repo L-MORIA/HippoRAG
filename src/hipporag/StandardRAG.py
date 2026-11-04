@@ -2,7 +2,7 @@ import logging
 import os
 import time
 from dataclasses import asdict
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from tqdm import tqdm
@@ -14,6 +14,12 @@ from .evaluation.retrieval_eval import RetrievalRecall
 from .llm import BaseLLM, _get_llm_class
 from .prompts.linking import get_query_instruction
 from .prompts.prompt_template_manager import PromptTemplateManager
+from .qa.grounding import (
+    ABSTAIN_TEXT,
+    GroundedAnswer,
+    format_fragments,
+    parse_grounded_response,
+)
 from .utils.config_utils import BaseConfig, build_working_dir
 from .utils.custom_types import QuerySolution
 from .utils.misc_utils import min_max_normalize
@@ -329,17 +335,22 @@ class StandardRAG:
                 - A list of raw response messages from the language model.
                 - A list of metadata dictionaries associated with the results.
         """
-        # Running inference for QA
-        all_qa_messages = []
+        # Running inference for QA. Пустой контекст не доходит до LLM:
+        # без фрагментов нет доказательства, поэтому сразу фиксируем отказ.
+        all_qa_messages: List[Optional[List[Dict]]] = []
+        all_fragment_counts: List[int] = []
 
         for query_solution in tqdm(queries, desc="Collecting QA prompts"):
-            # obtain the retrieved docs
             retrieved_passages = query_solution.docs[: self.global_config.qa_top_k]
+            all_fragment_counts.append(len(retrieved_passages))
 
-            prompt_user = ""
-            for passage in retrieved_passages:
-                prompt_user += f"Wikipedia Title: {passage}\n\n"
-            prompt_user += "Question: " + query_solution.question + "\nThought: "
+            if not retrieved_passages:
+                all_qa_messages.append(None)
+                continue
+
+            citations = list(query_solution.citations)[: self.global_config.qa_top_k]
+            prompt_user = format_fragments(retrieved_passages, citations)
+            prompt_user += "\n\nВопрос: " + query_solution.question + "\n"
 
             if self.prompt_template_manager.is_template_name_valid(
                 name=f"rag_qa_{self.global_config.dataset}"
@@ -358,29 +369,44 @@ class StandardRAG:
                 )
             )
 
+        pending = [(index, message) for index, message in enumerate(all_qa_messages) if message]
         all_qa_results = [
-            self.llm_model.infer(qa_messages)
-            for qa_messages in tqdm(all_qa_messages, desc="QA Reading")
+            self.llm_model.infer(message) for _, message in tqdm(pending, desc="QA Reading")
         ]
 
-        all_response_message, all_metadata, all_cache_hit = zip(*all_qa_results)
-        all_response_message, all_metadata = list(all_response_message), list(all_metadata)
+        all_response_message: List[str] = [""] * len(queries)
+        all_metadata: List[Dict] = [{} for _ in queries]
+        for (index, _), (response, metadata, _) in zip(pending, all_qa_results):
+            all_response_message[index] = response
+            all_metadata[index] = metadata
 
         # Process responses and extract predicted answers.
         queries_solutions = []
+        strict = self.global_config.qa_strict_grounding
         for query_solution_idx, query_solution in tqdm(
             enumerate(queries), desc="Extraction Answers from LLM Response"
         ):
-            response_content = all_response_message[query_solution_idx]
-            try:
-                pred_ans = response_content.split("Answer:")[1].strip()
-            except Exception as e:
-                logger.warning(
-                    f"Error in parsing the answer from the raw LLM QA inference response: {str(e)}!"
+            if all_qa_messages[query_solution_idx] is None:
+                grounded = GroundedAnswer(text=ABSTAIN_TEXT, abstained=True)
+                all_response_message[query_solution_idx] = ABSTAIN_TEXT
+            else:
+                grounded = parse_grounded_response(
+                    all_response_message[query_solution_idx],
+                    fragment_count=all_fragment_counts[query_solution_idx],
+                    strict=strict,
                 )
-                pred_ans = response_content
 
-            query_solution.answer = pred_ans
+            query_solution.answer = grounded.text
+            query_solution.abstained = grounded.abstained
+            query_solution.grounding_errors = grounded.errors
+
+            citations = list(query_solution.citations)[: self.global_config.qa_top_k]
+            query_solution.used_citations = [
+                citations[citation_id - 1]
+                for citation_id in grounded.used_citation_ids
+                if 1 <= citation_id <= len(citations)
+            ]
+
             queries_solutions.append(query_solution)
 
         return queries_solutions, all_response_message, all_metadata

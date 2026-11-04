@@ -83,6 +83,9 @@ def test_standard_rag_qa_does_not_raise_attribute_error(tmp_path, monkeypatch):
 
     rag.llm_model = _StubLLM()
     rag.global_config.qa_top_k = 2
+    # R-1 проверяет отсутствие AttributeError, а не заземление: старый ответ
+    # без ссылок должен дойти до результата, поэтому strict выключаем.
+    rag.global_config.qa_strict_grounding = False
 
     solutions = [QuerySolution(question="Что такое?", docs=["документ один"])]
     out_solutions, messages, metadata = rag.qa(solutions)
