@@ -1,5 +1,39 @@
 # История изменений HippoRAG
 
+## 2026-11-05 — H2-6: заземление Q&A
+
+### Добавлено
+- Единый контракт ответа `ОТВЕТ / ИСТОЧНИКИ / ОТКАЗ` и модуль
+  `src/hipporag/qa/grounding.py`: парсер ссылок `[n]`, общий отказ
+  `ABSTAIN_TEXT`, один repair-retry при ответе без валидных ссылок.
+- `HippoRAG.qa` и `StandardRAG.qa` не вызывают LLM при пустом контексте и
+  сохраняют `used_citations`, `abstained`, `grounding_errors`.
+- `/search`: `citations` теперь содержит только использованные цитаты,
+  добавлены `abstained` и `grounding_errors`, а `confidence` означает
+  качество заземления (`0.0 / 0.5 / 1.0`), а не вероятность правильности.
+- Режимы CLI 12 «Self-RAG», 19 «GraphRAG Agent» и 21 «DAT + LLM» используют
+  общий `answer_grounded`; ответы содержат inline-ссылки `[n]`.
+- Golden set `eval/grounding/golden_qa.jsonl` (36 вопросов) и
+  `scripts/eval_grounding.py`: abstention, false answer rate, citation
+  precision/recall, marker validity, uncited sentence rate, answer accuracy,
+  p50/p95 и сравнение baseline → after.
+- Логи `/search`: `abstained`, `grounding_errors`, `used_citations`,
+  `retrieved_docs`, latency и p95.
+
+### Изменено
+- `qa_strict_grounding=True` по умолчанию: ответ без валидных inline-ссылок
+  заменяется отказом. Аварийный откат — `qa_strict_grounding=False`.
+- Ответы режимов 12/19/21 вместо свободного текста возвращают
+  `ОТВЕТ / ИСТОЧНИКИ / ОТКАЗ`.
+
+### Ограничения
+- Режимы 9–11 (`sign_zones`) осознанно не переведены на Q&A-контракт: это
+  извлечение материала, резюме и стилистическая обработка, а не ответ на
+  вопрос.
+- Отчёт `eval/grounding/report_2026-11-04.*` проверяет механику на stub-LLM
+  (`quality_measurement=false`); реальный замер качества требует индекса и
+  LM Studio.
+
 ## 2026-05-14 — 23 метода, QA Cache, 4 модели
 
 ### Добавлено

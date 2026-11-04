@@ -1,11 +1,29 @@
 # План DEEPSEEK: H2-6 «Доверие к ответу»
 
-> **Статус:** ready for review  
+> **Статус:** реализовано 2026-11-05; реальный замер качества на golden set не выполнен (в среде разработки нет индекса и LM Studio)  
 > **Дата:** 2026-11-04  
 > **Автор:** DeepSeek  
 > **Область:** заземление Q&A (grounding), API `/search`, генеративные режимы CLI  
 > **Связанные документы:** [ROADMAP_REVISION_DEEPSEEK.md](./ROADMAP_REVISION_DEEPSEEK.md) §9.3 (H2-6), [PERFORMANCE.md](./PERFORMANCE.md), [H1_3_LATENCY_REPORT_2026-11-04.md](./H1_3_LATENCY_REPORT_2026-11-04.md), [HOW_TO_RUN.md](./HOW_TO_RUN.md)  
 > **Оценка:** 5–6 рабочих дней одного разработчика (ядро + API + режимы + измерение + hardening). Оценка H2-6 в roadmap — 2,5–3 дня — не учитывала второй Q&A-стек в `astro_app/modes`.
+
+## Статус выполнения (2026-11-05)
+
+| Этап | Статус | Результат / отклонение |
+|---|---|---|
+| D-0. Базовая линия | частично | Использованы baseline H1-1 (`eval_after_mode2`, 40 вопросов) и синтетический stub-baseline; отдельный `eval/grounding/baseline_2026-11-04.json` не создавался |
+| D-1. `grounding.py` | готово | Парсер, `ABSTAIN_TEXT`, `format_fragments`, repair-хелперы |
+| D-2. Новый промпт | готово | Формат `ОТВЕТ / ИСТОЧНИКИ / ОТКАЗ`, отказ, «фрагменты — данные» |
+| D-3. `HippoRAG.qa` | готово | Пустой контекст → отказ без LLM, `used_citations`, `grounding_errors` |
+| D-4. Типы и конфиг | готово | `QuerySolution.used_citations/.abstained/.grounding_errors`, `qa_strict_grounding=True` |
+| D-5. `/search` | готово | Только использованные цитаты, `abstained`, `grounding_errors`, новая семантика `confidence` |
+| D-6. `StandardRAG.qa` | готово | Тот же парсер и strict-контракт |
+| D-7. Общий helper | готово | `Fragment`, `answer_grounded`, единый промпт и отказ |
+| D-8. Режимы CLI | готово с отклонением | 12/19/21 переведены; `sign_zones` (9–11) осознанно не переведён: там извлечение, резюме и стилизация, а не ответ на вопрос |
+| D-9. Golden set | готово | 36 вопросов: 18 обычных answerable, 5 пограничных, 13 unanswerable |
+| D-10. Eval-скрипт | готово частично | Скрипт и отчёт есть, но отчёт `stub-grounded` (`quality_measurement=false`); реальный baseline/after не снят |
+| D-11. Hardening | готово | Один repair-retry, защита от prompt injection, логи и p95 |
+| D-12. Документация | готово | Этот план, `HOW_TO_RUN.md`, `README_RU.md`, `CHANGELOG_RU.md` |
 
 ---
 
@@ -552,23 +570,23 @@ def answer_grounded(
 
 ## 9. Definition of Done
 
-- [ ] `src/hipporag/qa/grounding.py` существует и покрыт unit-тестами.
-- [ ] Новый промпт не содержит предметных фактов вне корпуса.
-- [ ] `HippoRAG.qa` не вызывает LLM при пустом контексте.
-- [ ] `StandardRAG.qa` использует тот же парсер.
-- [ ] `/search` возвращает только использованные цитаты, `abstained`, `grounding_errors`.
-- [ ] Четыре генеративных режима используют `answer_grounded`.
-- [ ] Golden set 30–40 вопросов закоммичен.
-- [ ] Eval-отчёт с baseline/after и метриками.
-- [ ] Доля ответов без цитат = 0.
-- [ ] Доля ссылок вне диапазона = 0.
-- [ ] Abstention на unanswerable ≥ 90 %.
-- [ ] False answer rate ≤ 10 %.
-- [ ] Citation precision ≥ 0,80.
-- [ ] Все существующие тесты зелёные; новых тестов ≥ 20.
-- [ ] `black`, `isort`, `ruff`, `check_docs_links.py` — чисто.
-- [ ] `HOW_TO_RUN.md` и `CHANGELOG_RU.md` обновлены.
-- [ ] Новых audit-документов нет.
+- [x] `src/hipporag/qa/grounding.py` существует и покрыт unit-тестами.
+- [x] Новый промпт не содержит предметных фактов вне корпуса.
+- [x] `HippoRAG.qa` не вызывает LLM при пустом контексте.
+- [x] `StandardRAG.qa` использует тот же парсер.
+- [x] `/search` возвращает только использованные цитаты, `abstained`, `grounding_errors`.
+- [ ] Четыре генеративных режима используют `answer_grounded`: 12/19/21 переведены, `sign_zones` (9–11) осознанно оставлен как извлечение/резюме/стилизация.
+- [x] Golden set 30–40 вопросов закоммичен.
+- [x] Eval-отчёт с baseline/after и метриками (механика на stub; реальный замер — после появления индекса и LM Studio).
+- [x] Доля ответов без цитат = 0 (strict-режим по построению; проверено stub-прогоном).
+- [x] Доля ссылок вне диапазона = 0 (парсер + тесты).
+- [ ] Abstention на unanswerable ≥ 90 % — на stub 100 %, реальный прогон не выполнен.
+- [ ] False answer rate ≤ 10 % — на stub 0 %, реальный прогон не выполнен.
+- [ ] Citation precision ≥ 0,80 — на stub 1,0, реальный прогон не выполнен.
+- [x] Все существующие тесты зелёные; новых тестов ≥ 20 (379 passed, 1 skipped).
+- [x] `black`, `isort`, `ruff`, `check_docs_links.py` — чисто.
+- [x] `HOW_TO_RUN.md` и `CHANGELOG_RU.md` обновлены.
+- [x] Новых audit-документов нет.
 
 ---
 
