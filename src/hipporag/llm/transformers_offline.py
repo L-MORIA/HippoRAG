@@ -60,19 +60,25 @@ class TransformersOffline:
 
     def infer(self, messages: List[TextChatMessage], max_tokens=2048):
         logger.info(f"Calling Transformers offline, # of messages {len(messages)}")
-        messages_list = [messages]
-        prompt_text = convert_text_chat_messages_to_input_string(messages_list, self.tokenizer)
-        input_ids = self.tokenizer.encode(prompt_text)
-        transformers_output = self.model.generate(input_ids, max_new_tokens=max_tokens)
+        # Промпт строится из ОДНОГО разговора: apply_chat_template должен
+        # получить список сообщений. Обёртка [messages] превращала запрос в
+        # БАТЧ — apply_chat_template возвращал список строк, который
+        # tokenizer.encode() не принимает (аудит 04.11.2026, N-1).
+        prompt_text = convert_text_chat_messages_to_input_string(messages, self.tokenizer)
+        encoded = self.tokenizer(prompt_text, return_tensors="pt").to(self.model.device)
+        input_ids = encoded["input_ids"]
+        transformers_output = self.model.generate(**encoded, max_new_tokens=max_tokens)
         # generate() возвращает промпт вместе с ответом: декодировать нужно только
         # сгенерированную часть (аудит 04.11.2026, S-4 — фикс из 9e881f8).
         response = self.tokenizer.decode(
-            transformers_output[0][len(input_ids) :], skip_special_tokens=True
+            transformers_output[0][input_ids.shape[1] :], skip_special_tokens=True
         )
-        prompt_tokens = len(input_ids)
-        completion_tokens = transformers_output.shape[1] - prompt_tokens
+        prompt_tokens = int(input_ids.shape[1])
+        completion_tokens = int(transformers_output.shape[1]) - prompt_tokens
         metadata = {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens}
-        return response, metadata
+        # Контракт BaseLLM.infer — тройка (контент, метаданные, признак кэша);
+        # у offline-бэкенда кэша нет (аудит 04.11.2026, N-4).
+        return response, metadata, False
 
     def batch_infer(
         self, messages_list: List[List[TextChatMessage]], max_tokens=2048, json_template=None
@@ -100,12 +106,27 @@ class TransformersOffline:
             for i in range(0, len(all_prompt_texts), 4):
                 # generate() ждёт id-токены, а не сырые строки, и параметр называется
                 # max_new_tokens (аудит 04.11.2026, S-4 — фикс из 9e881f8).
-                encoded = self.tokenizer(
-                    all_prompt_texts[i : i + 4], return_tensors="pt", padding=True
-                ).to(self.model.device)
-                transformers_output = self.model.generate(**encoded, max_new_tokens=max_tokens)
-                decoded = self.tokenizer.batch_decode(transformers_output, skip_special_tokens=True)
-                transformers_outputs.extend(decoded)
+                #
+                # Батчевая генерация требует LEFT-padding: при right-padding
+                # модель продолжает текст с pad-токена. Пробка промпта идёт
+                # отдельным шагом (аудит 04.11.2026, N-2).
+                original_padding_side = getattr(self.tokenizer, "padding_side", "right")
+                self.tokenizer.padding_side = "left"
+                try:
+                    encoded = self.tokenizer(
+                        all_prompt_texts[i : i + 4], return_tensors="pt", padding=True
+                    ).to(self.model.device)
+                    transformers_output = self.model.generate(**encoded, max_new_tokens=max_tokens)
+                finally:
+                    self.tokenizer.padding_side = original_padding_side
+                # generate() возвращает промпт вместе с ответом: декодировать нужно
+                # только сгенерированную часть, иначе промпт утекает в ответ, а
+                # completion_tokens завышается (аудит 04.11.2026, N-2).
+                input_width = encoded["input_ids"].shape[1]
+                for row in transformers_output:
+                    transformers_outputs.append(
+                        self.tokenizer.decode(row[input_width:], skip_special_tokens=True)
+                    )
         # Guided-декодирование возвращает pydantic-объекты, free-form — строки.
         all_responses = [
             completion.model_dump_json() if hasattr(completion, "model_dump_json") else completion
