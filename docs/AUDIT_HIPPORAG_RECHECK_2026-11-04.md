@@ -65,7 +65,7 @@ rag = StandardRAG(global_config=cfg)        # cfg: save_dir=tmp, llm_base_url=lo
 Раньше цепочка `StandardRAG.py → openie_vllm_offline.py → vllm_offline.py → from vllm import …` роняла импорт на системах без vllm. Сейчас:
 
 - из `StandardRAG.py` импорт `openie_vllm_offline` убран полностью (импорты файла: `StandardRAG.py:1–18`);
-- в `HippoRAG.py:18–26` оба offline-OpenIE обёрнуты в `try/except ImportError` с деградацией в `None`;
+- в `HippoRAG.py:19–26` оба offline-OpenIE обёрнуты в `try/except ImportError` с деградацией в `None`;
 - vllm вынесен в extra `offline` (`pyproject.toml:67–70`) с пометкой «Offline-режим OpenIE отключён в этой сборке».
 
 Проверка живьём в окружении **без vllm**:
@@ -102,7 +102,7 @@ from hipporag import HippoRAG         → OK
 # rerank.py:146
 logger.warning(f"LLM rerank call failed, falling back to score order: {e}")
 ...
-# rerank.py:155–159
+# rerank.py:163–166
 if not result_indices and candidate_items:
     result_indices = list(range(min(len(candidate_items), len_after_rerank or len(candidate_items))))
 ```
