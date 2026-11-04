@@ -21,7 +21,7 @@
 | D-7. Общий helper | готово | `Fragment`, `answer_grounded`, единый промпт и отказ |
 | D-8. Режимы CLI | готово с отклонением | 12/19/21 переведены; `sign_zones` (9–11) осознанно не переведён: там извлечение, резюме и стилизация, а не ответ на вопрос |
 | D-9. Golden set | готово | 36 вопросов: 18 обычных answerable, 5 пограничных, 13 unanswerable |
-| D-10. Eval-скрипт | готово частично | Скрипт и отчёт есть, но отчёт `stub-grounded` (`quality_measurement=false`); реальный baseline/after не снят |
+| D-10. Eval-скрипт | готово частично | Метрики и stub-отчёт есть; real-eval адаптер `scripts/grounding_retriever.py` готов. Реальный baseline/after не снят: нужен индекс и LM Studio |
 | D-11. Hardening | готово | Один repair-retry, защита от prompt injection, логи и p95 |
 | D-12. Документация | готово | Этот план, `HOW_TO_RUN.md`, `README_RU.md`, `CHANGELOG_RU.md` |
 
@@ -577,13 +577,13 @@ def answer_grounded(
 - [x] `/search` возвращает только использованные цитаты, `abstained`, `grounding_errors`.
 - [ ] Четыре генеративных режима используют `answer_grounded`: 12/19/21 переведены, `sign_zones` (9–11) осознанно оставлен как извлечение/резюме/стилизация.
 - [x] Golden set 30–40 вопросов закоммичен.
-- [x] Eval-отчёт с baseline/after и метриками (механика на stub; реальный замер — после появления индекса и LM Studio).
+- [x] Eval-отчёт с baseline/after и метриками (механика на stub; real-eval адаптер `scripts/grounding_retriever.py` готов, запуск — на машине с индексом и LM Studio).
 - [x] Доля ответов без цитат = 0 (strict-режим по построению; проверено stub-прогоном).
 - [x] Доля ссылок вне диапазона = 0 (парсер + тесты).
 - [ ] Abstention на unanswerable ≥ 90 % — на stub 100 %, реальный прогон не выполнен.
 - [ ] False answer rate ≤ 10 % — на stub 0 %, реальный прогон не выполнен.
 - [ ] Citation precision ≥ 0,80 — на stub 1,0, реальный прогон не выполнен.
-- [x] Все существующие тесты зелёные; новых тестов ≥ 20 (379 passed, 1 skipped).
+- [x] Все существующие тесты зелёные; новых тестов ≥ 20 (394 passed, 1 skipped).
 - [x] `black`, `isort`, `ruff`, `check_docs_links.py` — чисто.
 - [x] `HOW_TO_RUN.md` и `CHANGELOG_RU.md` обновлены.
 - [x] Новых audit-документов нет.

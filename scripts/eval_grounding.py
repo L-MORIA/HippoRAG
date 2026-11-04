@@ -953,15 +953,24 @@ def format_markdown(
         f"- Дата: {report.get('generated_at', '—')}",
         f"- Режим: `{mode}`",
         f"- Разметка: `{report.get('dataset', '—')}`",
+    ]
+    baseline = report.get("baseline") or {}
+    if baseline.get("dataset"):
+        lines.append(f"- Baseline: `{baseline['dataset']}`")
+    run_config = report.get("run_config") or {}
+    if run_config:
+        details = ", ".join(
+            f"{key}={value}" for key, value in run_config.items() if value is not None
+        )
+        if details:
+            lines.append(f"- Запуск: `{details}`")
+    lines += [
         f"- Вопросов: {metrics['n_total']} "
         f"(answerable {metrics['n_answerable']}, "
         f"borderline {metrics['n_borderline']}, "
         f"unanswerable {metrics['n_unanswerable']})",
         "",
     ]
-    baseline = report.get("baseline") or {}
-    if baseline.get("dataset"):
-        lines.insert(5, f"- Baseline: `{baseline['dataset']}`")
     if mode.startswith("stub"):
         lines += [
             "> **Это проверка механики, а не качества.** Ответы построены по "

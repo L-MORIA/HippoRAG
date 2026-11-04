@@ -17,6 +17,10 @@
   `scripts/eval_grounding.py`: abstention, false answer rate, citation
   precision/recall, marker validity, uncited sentence rate, answer accuracy,
   p50/p95 и сравнение baseline → after.
+- `scripts/grounding_retriever.py` — real-eval адаптер: прогоняет golden set
+  через настоящий `HippoRAG.rag_qa`, сохраняет predictions и отчёт, позволяет
+  сравнить `qa_top_k` без правки `.env`; ошибка вопроса фиксируется как
+  `runtime_error:<Type>` и не роняет весь прогон.
 - Логи `/search`: `abstained`, `grounding_errors`, `used_citations`,
   `retrieved_docs`, latency и p95.
 
@@ -31,8 +35,8 @@
   извлечение материала, резюме и стилистическая обработка, а не ответ на
   вопрос.
 - Отчёт `eval/grounding/report_2026-11-04.*` проверяет механику на stub-LLM
-  (`quality_measurement=false`); реальный замер качества требует индекса и
-  LM Studio.
+  (`quality_measurement=false`); real-eval адаптер готов, но реальный замер
+  качества требует индекса и LM Studio.
 
 ## 2026-05-14 — 23 метода, QA Cache, 4 модели
 

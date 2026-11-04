@@ -175,6 +175,48 @@ python main.py
 - Режимы 9–11 (`Весь знак`, `Резюме`, `Обраб.`) — не Q&A, а извлечение,
   резюме и стилистическая обработка; их формат не меняется.
 
+### 7.2. Реальный замер заземления на golden set
+
+Одна команда запускает 36 размеченных вопросов через настоящий
+`HippoRAG.rag_qa` — без копии QA-пути и без stub-ответов:
+
+```bash
+python scripts/grounding_retriever.py \
+  --save-dir outputs/astrology_test \
+  --llm-name gemma-4-e4b \
+  --llm-base-url http://localhost:1234/v1
+```
+
+По умолчанию пишутся:
+
+* `eval/grounding/report_2026-11-04.json` — метрики, пороги и построчные результаты;
+* `eval/grounding/report_2026-11-04.md` — тот же отчёт для ревью;
+* `eval/grounding/predictions_2026-11-04.jsonl` — ответы по мере прогона.
+
+В отчёте режим `real-rag_qa` и `quality_measurement=true`: это уже измерение
+качества, а не проверка механики. Код возврата: `0` — пороги выполнены,
+`1` — есть проваленные пороги, `2` — ошибка разметки или запуска.
+
+Чтобы сравнить `qa_top_k`, задайте отдельные пути, иначе отчёты перезапишут
+друг друга:
+
+```bash
+python scripts/grounding_retriever.py --qa-top-k 5 \
+  --out-json eval/grounding/report_top5.json \
+  --out-md eval/grounding/report_top5.md \
+  --out-predictions eval/grounding/predictions_top5.jsonl
+python scripts/grounding_retriever.py --qa-top-k 8 \
+  --out-json eval/grounding/report_top8.json \
+  --out-md eval/grounding/report_top8.md \
+  --out-predictions eval/grounding/predictions_top8.jsonl
+```
+
+Смотрите на `citation_recall` и `answer_rate_answerable`: рост `qa_top_k`
+помогает, пока в промпт попадают релевантные фрагменты, и вредит, когда
+добавляется шум. Ошибка на отдельном вопросе не роняет прогон — она
+записывается как `runtime_error:<Type>`; `--fail-fast` останавливает
+на первой ошибке, `--no-strict` отключает замену ответа без цитат на отказ.
+
 ## 8. Тесты
 
 ```bash
