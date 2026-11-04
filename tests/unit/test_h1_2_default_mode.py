@@ -2,7 +2,7 @@
 
 После H1-2 должно быть правдой:
 
-* `DEFAULT_MODE` существует в реестре и это измеренный режим «2» (Граф) —
+* `DEFAULT_MODE` существует в реестре и это измеренный режим «5» (BM25+CE-ru, p95 225 мс) —
   единственный измеренный режим, укладывающийся в бюджет p95 ≤ 10 с;
 * ровно два рекомендованных режима — «1» и «2», и только у них `star`;
 * у каждого из 23 режимов заполнено поле `when` («когда уместен»);
@@ -19,14 +19,14 @@ from astro_app.modes import DEFAULT_MODE, MODES, RECOMMENDED_MODES, expert_modes
 
 def test_default_mode_is_measured_graph_mode():
     """Default зафиксирован как режим 2 «Граф» (решение по данным H1-1)."""
-    assert DEFAULT_MODE == "2"
+    assert DEFAULT_MODE == "5"
     assert DEFAULT_MODE in MODES
-    assert MODES[DEFAULT_MODE].label == "Граф"
+    assert MODES[DEFAULT_MODE].label == "BM25+CE-ru"
 
 
 def test_recommended_modes_are_one_and_two():
     """Ровно два рекомендованных режима: 1 (качество) и 2 (скорость)."""
-    assert RECOMMENDED_MODES == ("1", "2")
+    assert RECOMMENDED_MODES == ("2", "5")
     assert set(RECOMMENDED_MODES) <= set(MODES)
 
 

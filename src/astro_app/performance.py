@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 
@@ -175,6 +176,44 @@ def load_baseline(path: Optional[Path] = None) -> Dict[str, Any]:
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def merge_baseline(existing: Dict[str, Any], fresh: Dict[str, Any]) -> Dict[str, Any]:
+    """Слить новый снимок со старым: режимы из `fresh` заменяют одноимённые.
+
+    Запись снимка целиком теряет режимы, которых не было в текущем прогоне:
+    замерили только режим 5 — пропали 1, 12, 19, 21. Слияние обновляет лишь
+    измеренное, остальное сохраняет как есть.
+    """
+    merged: Dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
+    incoming: Dict[str, Any] = fresh if isinstance(fresh, dict) else {}
+
+    previous_llm = merged.get("llm")
+    for key, value in incoming.items():
+        if key != "modes":
+            merged[key] = value
+
+    updated = sorted(str(mode) for mode in (incoming.get("modes") or {}))
+    modes: Dict[str, Any] = dict(merged.get("modes") or {})
+    modes.update(incoming.get("modes") or {})
+    merged["modes"] = modes
+
+    # Прогон без LLM не должен перезаписывать модель, которой мерили
+    # LLM-режимы: иначе в снимке окажется конфиг по умолчанию вместо факта.
+    fresh_uses_llm = any(
+        isinstance(entry, dict) and (entry.get("llm_calls_mean") or 0) > 0
+        for entry in (incoming.get("modes") or {}).values()
+    )
+    merged["llm"] = incoming.get("llm") if fresh_uses_llm else (previous_llm or incoming.get("llm"))
+
+    merged["generated_at"] = incoming.get("generated_at") or merged.get("generated_at")
+    merged["merged_at"] = datetime.now().isoformat(timespec="seconds")
+    merged["merged_modes"] = updated
+    merged["provenance"] = (
+        "слияние снимков: режимы из последнего прогона заменяют одноимённые, "
+        "остальные сохранены; сырые отчёты лежат вне репозитория (outputs/ в .gitignore)"
+    )
+    return merged
 
 
 def baseline_verdicts(

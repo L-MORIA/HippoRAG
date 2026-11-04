@@ -1,9 +1,15 @@
 {
-  "generated_at": "2026-11-03",
-  "provenance": "Значения перенесены из eval/dataset/RESULTS_REPORTED.md — это фиксация живого прогона автора (scripts/eval_search_quality.py, индекс astrology_test, 40 вопросов H1-1). Сырой отчёт лежит вне репозитория (outputs/ в .gitignore), поэтому независимого воспроизведения из репозитория нет. После собственного прогона файл перезаписывается: python scripts/benchmark_budget.py --from-report <report.json> --update-baseline",
-  "transcribed_from": "eval/dataset/RESULTS_REPORTED.md",
-  "index": "astrology_test (1369 чанков), локальный",
-  "llm": "google/gemma-4-e4b (LM Studio, JIT)",
+  "generated_at": "2026-11-04T16:46:07",
+  "provenance": "слияние снимков: режимы из последнего прогона заменяют одноимённые, остальные сохранены; сырые отчёты лежат вне репозитория (outputs/ в .gitignore)",
+  "index": "outputs/astrology_test",
+  "dataset": {
+    "path": "eval\\dataset\\questions.jsonl",
+    "sha256": "3d8a70a909ac22b9279c8dbb555694a9d46afd40f0bd9dc27d146a723e16d8bf",
+    "n_questions": 40,
+    "n_incomplete": 0,
+    "include_draft": false
+  },
+  "llm": "google/gemma-4-e4b",
   "n_questions": 40,
   "budgets_ms": {
     "default": 10000,
@@ -13,63 +19,79 @@
   "modes": {
     "1": {
       "label": "Multi-vector",
-      "p50_ms": 6200,
-      "p95_ms": 12800,
-      "retrieval_p50_ms": null,
-      "retrieval_p95_ms": null,
+      "p50_ms": 6152.8,
+      "p95_ms": 12807.07,
+      "retrieval_p50_ms": 2555.3,
+      "retrieval_p95_ms": 3001.345,
       "llm_calls_mean": 1.0,
       "recall@k_doc": 0.975,
-      "mrr@k_doc": 0.921,
-      "ndcg@k_doc": 0.935,
-      "adequacy_mean": null
-    },
-    "2": {
-      "label": "Граф",
-      "p50_ms": 545,
-      "p95_ms": null,
-      "retrieval_p50_ms": null,
-      "retrieval_p95_ms": null,
-      "llm_calls_mean": 0.0,
-      "recall@k_doc": 0.95,
-      "mrr@k_doc": 0.921,
-      "ndcg@k_doc": null,
+      "mrr@k_doc": 0.9208,
+      "ndcg@k_doc": 0.9348,
       "adequacy_mean": null
     },
     "12": {
       "label": "Self-RAG",
-      "p50_ms": 23800,
-      "p95_ms": 37900,
-      "retrieval_p50_ms": null,
-      "retrieval_p95_ms": null,
+      "p50_ms": 23804.5,
+      "p95_ms": 37936.925,
+      "retrieval_p50_ms": 2566.35,
+      "retrieval_p95_ms": 2888.655,
       "llm_calls_mean": 1.0,
       "recall@k_doc": null,
       "mrr@k_doc": null,
       "ndcg@k_doc": null,
-      "adequacy_mean": 0.753
+      "adequacy_mean": 0.7535
     },
     "19": {
       "label": "GraphRAG",
-      "p50_ms": 16600,
-      "p95_ms": 33000,
-      "retrieval_p50_ms": null,
-      "retrieval_p95_ms": null,
+      "p50_ms": 16605.35,
+      "p95_ms": 32954.265,
+      "retrieval_p50_ms": 2650.35,
+      "retrieval_p95_ms": 3031.725,
       "llm_calls_mean": 1.0,
       "recall@k_doc": null,
       "mrr@k_doc": null,
       "ndcg@k_doc": null,
-      "adequacy_mean": 0.667
+      "adequacy_mean": 0.6667
     },
     "21": {
       "label": "DAT+LLM",
-      "p50_ms": 21100,
-      "p95_ms": 29400,
-      "retrieval_p50_ms": null,
-      "retrieval_p95_ms": null,
+      "p50_ms": 21097.35,
+      "p95_ms": 29403.655,
+      "retrieval_p50_ms": 447.9,
+      "retrieval_p95_ms": 857.085,
       "llm_calls_mean": 3.0,
       "recall@k_doc": null,
       "mrr@k_doc": null,
       "ndcg@k_doc": null,
-      "adequacy_mean": 0.812
+      "adequacy_mean": 0.8125
+    },
+    "2": {
+      "label": "Граф",
+      "p50_ms": 544.55,
+      "p95_ms": 661.16,
+      "retrieval_p50_ms": 544.55,
+      "retrieval_p95_ms": 661.16,
+      "llm_calls_mean": 0.0,
+      "recall@k_doc": 0.95,
+      "mrr@k_doc": 0.9125,
+      "ndcg@k_doc": 0.928,
+      "adequacy_mean": null
+    },
+    "5": {
+      "label": "BM25+CE-ru",
+      "p50_ms": 197.3,
+      "p95_ms": 225.46,
+      "retrieval_p50_ms": 197.3,
+      "retrieval_p95_ms": 225.46,
+      "llm_calls_mean": 0.0,
+      "recall@k_doc": 0.975,
+      "mrr@k_doc": 0.9021,
+      "ndcg@k_doc": 0.9206,
+      "adequacy_mean": null
     }
-  }
+  },
+  "merged_at": "2026-11-04T16:46:07",
+  "merged_modes": [
+    "5"
+  ]
 }

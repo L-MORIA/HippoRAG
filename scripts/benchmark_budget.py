@@ -22,6 +22,9 @@
 
     # обновить снимок замеров в репозитории (eval/dataset/latency_baseline.json)
     python scripts/benchmark_budget.py --from-report outputs/reports/eval_after_llm.json --update-baseline
+
+    # то же, но без потери режимов, которых не было в этом прогоне
+    python scripts/benchmark_budget.py --from-report outputs/reports/eval_mode5.json --merge-baseline
 """
 
 from __future__ import annotations
@@ -155,10 +158,22 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument("--out", default=None, help="куда сохранить JSON с вердиктами")
     parser.add_argument("--markdown-out", default=None, help="куда сохранить Markdown-таблицу")
-    parser.add_argument(
+    baseline_group = parser.add_mutually_exclusive_group()
+    baseline_group.add_argument(
         "--update-baseline",
         action="store_true",
-        help=f"обновить снимок замеров {BASELINE_FILE.relative_to(ROOT)}",
+        help=(
+            f"перезаписать снимок замеров {BASELINE_FILE.relative_to(ROOT)} "
+            "только режимами из этого прогона"
+        ),
+    )
+    baseline_group.add_argument(
+        "--merge-baseline",
+        action="store_true",
+        help=(
+            f"слить снимок замеров {BASELINE_FILE.relative_to(ROOT)}: режимы из этого "
+            "прогона заменяют одноимённые, остальные сохраняются"
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -231,6 +246,18 @@ def main(argv: Optional[List[str]] = None) -> int:
             json.dumps(baseline, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
         )
         print(f"Снимок замеров обновлён: {BASELINE_FILE.relative_to(ROOT)}")
+
+    if args.merge_baseline:
+        merged = perf.merge_baseline(perf.load_baseline(), build_baseline(report))
+        BASELINE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        BASELINE_FILE.write_text(
+            json.dumps(merged, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+        )
+        updated = ", ".join(merged.get("merged_modes") or [])
+        print(
+            f"Снимок замеров слит: {BASELINE_FILE.relative_to(ROOT)} "
+            f"(обновлены режимы: {updated or '—'})"
+        )
 
     return 0 if verdicts["ok"] else 1
 

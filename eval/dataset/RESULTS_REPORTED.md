@@ -23,7 +23,13 @@
 | nDCG@10 | 0.935 |
 | p50 / p95 | 6.2 с / 12.8 с |
 
-Режим 2 «Граф» на том же датасете: recall@5 = 95.0 %, MRR = 0.921.
+Режим 2 «Граф» на том же датасете: recall@5 = 95.0 % (док) / 60.0 % (стр),
+MRR@10 = 0.913 (док) / 0.477 (стр), nDCG@10 = 0.928, p50 545 мс / p95 661 мс.
+
+Режим 5 «BM25 + RU cross-encoder» (`DiTy/cross-encoder-russian-msmarco`):
+recall@5 = 97.5 % (док) / **65.0 %** (стр), MRR@10 = 0.902 (док) / **0.520** (стр),
+nDCG@10 = 0.921, p50 **197 мс** / p95 **225 мс**, LLM не используется.
+Отчёт: `outputs/reports/eval_mode5.{json,md}` (вне репозитория).
 
 ### Как читать постраничный recall
 
@@ -54,20 +60,38 @@ LLM-переформулировку. Сравнение «до/после» д�
 Остаточные отказы: 19 GraphRAG — 10 % (4/40), 21 DAT — 7.5 % (3/40),
 12 Self-RAG — 2.5 % (1/40). Отказы корректные (LLM не нашёл данных в источниках).
 
+## Вердикты бюджета латентности (H1-3)
+
+Снимок `eval/dataset/latency_baseline.json` собран слиянием трёх отчётов
+(`eval_after_llm`, `eval_after_mode2`, `eval_mode5`).
+
+| Режим | p50 | p95 | Бюджет | Вердикт |
+|---|---|---|---|---|
+| 2 «Граф» (default) | 545 мс | 661 мс | 10 с | ok |
+| 5 «BM25+CE-ru» | 197 мс | 225 мс | 30 с (роль expert) | ok |
+| 1 «Multi-vector» | 6.2 с | 12.8 с | 30 с | ok |
+| 21 «DAT+LLM» | 21.1 с | 29.4 с | 30 с | ok (впритык) |
+| 19 «GraphRAG» | 16.6 с | 33.0 с | 30 с | experimental |
+| 12 «Self-RAG» | 23.8 с | 37.9 с | 30 с | experimental |
+
 ## Как воспроизвести
 
 ```bash
 # 1. Поднять LM Studio с моделью gemma-4-e4b на http://localhost:1234/v1
+#    (режиму 5 LLM не нужен — он работает и без LM Studio)
 # 2. Прогнать замер на нужном индексе:
 python scripts/eval_search_quality.py \
     --index outputs/astrology_test \
-    --modes 1,2,12,19,21 \
+    --modes 1,2,5,12,19,21 \
     --warmup \
     --out outputs/reports/eval_after_llm
 
-# 3. Сверить метрики с таблицами выше.
+# 3. Пересчитать вердикты и слить снимок, не теряя чужие режимы:
+python scripts/benchmark_budget.py --from-report outputs/reports/eval_after_llm.json --merge-baseline
+
+# 4. Сверить метрики с таблицами выше.
 #    Без индекса и LLM доступна только проверка контракта датасета и метрик:
-pytest tests/unit/test_eval_smoke_contract.py -v
+pytest tests/unit/test_eval_smoke_contract.py tests/unit/test_performance_budget.py -v
 ```
 
 ## Что проверяется в CI
