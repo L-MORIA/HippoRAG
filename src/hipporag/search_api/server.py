@@ -197,9 +197,10 @@ async def search(request: SearchRequest):
             0
         ]  # results[0] = tuple, [0] = queries_solutions list, [0] = first QuerySolution
 
-        # Подготовка цитат
+        # Подготовка цитат: только те, на которые ответ реально сослался.
+        # Полный список найденных фрагментов остаётся в retrieved_docs.
         citations = []
-        for citation in result.citations:
+        for citation in result.used_citations:
             citations.append(
                 {
                     "source_file": citation.source_file,
@@ -214,8 +215,13 @@ async def search(request: SearchRequest):
         # Вычисление времени обработки
         processing_time = time.time() - start_time
 
-        # Оценка уверенности (упрощенная)
-        confidence = min(1.0, len(citations) / 5.0)  # Базовая оценка по количеству цитат
+        # Грубая оценка заземления, а не вероятность правильности ответа.
+        if result.abstained or not citations:
+            confidence = 0.0
+        elif result.grounding_errors:
+            confidence = 0.5
+        else:
+            confidence = 1.0
 
         search_result = SearchResult(
             answer=result.answer,
@@ -224,6 +230,8 @@ async def search(request: SearchRequest):
             retrieved_docs=(
                 result.docs[: request.top_k] if not request.include_full_text else result.docs
             ),
+            abstained=result.abstained,
+            grounding_errors=result.grounding_errors,
             processing_time=processing_time,
         )
 

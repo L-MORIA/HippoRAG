@@ -25,9 +25,26 @@ class Citation(BaseModel):
 
 class SearchResult(BaseModel):
     answer: str = Field(..., description="Ответ на вопрос")
-    confidence: float = Field(..., ge=0.0, le=1.0, description="Уверенность модели в ответе")
-    citations: List[Citation] = Field(..., description="Цитаты из источников")
+    confidence: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Грубая доля подтверждённых цитат (0 — отказ или нет ссылок, "
+            "0.5 — есть ошибки заземления, 1.0 — чистое заземление). "
+            "Не вероятность правильности ответа."
+        ),
+    )
+    citations: List[Citation] = Field(
+        ..., description="Только те цитаты, на которые ответ реально сослался"
+    )
     retrieved_docs: List[str] = Field(..., description="Релевантные фрагменты документов")
+    abstained: bool = Field(
+        default=False, description="Модель отказалась отвечать: в контексте нет ответа"
+    )
+    grounding_errors: List[str] = Field(
+        default_factory=list, description="Ошибки заземления: невалидные или неполные ссылки"
+    )
     processing_time: float = Field(..., description="Время обработки запроса в секундах")
 
 
