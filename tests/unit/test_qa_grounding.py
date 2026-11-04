@@ -164,3 +164,21 @@ def test_empty_answer_abstains(raw):
 
     assert result.text == ABSTAIN_TEXT
     assert result.abstained is True
+
+
+def test_astrology_template_renders_grounded_contract():
+    from hipporag.prompts.prompt_template_manager import PromptTemplateManager
+
+    manager = PromptTemplateManager()
+    rendered = manager.render(name="rag_qa_astrology", prompt_user="Вопрос: тест")
+
+    assert isinstance(rendered, list)
+    system = rendered[0]["content"]
+    assert ABSTAIN_TEXT in system
+    assert "[1]" in system
+    assert "гуа 8" not in system
+
+    # Положительный пример показывает ссылку, отрицательный — отказ.
+    assert "[1]" in rendered[2]["content"]
+    assert "ОТКАЗ: да" in rendered[4]["content"]
+    assert rendered[-1] == {"role": "user", "content": "Вопрос: тест"}
