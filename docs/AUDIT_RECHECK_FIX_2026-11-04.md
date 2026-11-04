@@ -94,7 +94,7 @@ MRR@10 и nDCG@10 режим 2 минимально лучше. Разница �
 | **R-2** — проверка кэша смотрит только в под-словарь `'passage'`; под-словарь `'triple'`, который не заполняет никто, больше не участвует в условии (докстринг метода тоже приведён в соответствие) | `src/hipporag/StandardRAG.py` |
 | **R-3** — декодируется только сгенерированная часть (`response[0][prompt_len:]`), `completion_tokens` считает только завершение | `src/hipporag/llm/transformers_llm.py` |
 | **R-4** — удалён misleading-лог из `retrieve()` | `src/hipporag/StandardRAG.py` |
-| **S-3** — `outlines>=0.0.46` объявлен в extra `offline` рядом с `vllm` | `pyproject.toml` |
+| **S-3** — `outlines>=0.0.46` объявлен в extra `offline` рядом с `vllm`. **Уточнено в раунде 8**: сама декларация оказалась неисполнимой (`outlines` 0.0.x требует `numpy<2`, что ломает остальное окружение), заменена на `outlines>=1.0,<2` с маркером `python_version < "3.14"`, а код переведён на современный API — см. `docs/AUDIT_OUTLINES_DEPENDENCY_2026-11-04.md` | `pyproject.toml` |
 | **S-4** — декод только завершения; входы токенизируются; `max_new_tokens` вместо `max_tokens`; `model_dump_json()` вызывается только для guided-объектов | `src/hipporag/llm/transformers_offline.py` |
 
 Патчи сверены с оригинальным коммитом `9e881f8` (фиксы, потерянные при
@@ -125,7 +125,8 @@ MRR@10 и nDCG@10 режим 2 минимально лучше. Разница �
 * **R-3** — в ответ попадают только токены завершения; `prompt_tokens` = 4,
   `completion_tokens` = 2;
 * **R-4** — в исходнике `retrieve()` нет misleading-лога;
-* **S-3** — `outlines` объявлен в extra `offline`;
+* **S-3** — `outlines` объявлен в extra `offline` (уточнено в раунде 8: декларация
+  исправлена на работоспособную, guided-путь проверен настоящим пакетом);
 * **S-4** — offline-бэкенд декодирует только завершение, `generate()` получает
   токенизированные входы и `max_new_tokens`, `model_dump_json` — только для
   guided-объектов;
