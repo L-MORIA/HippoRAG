@@ -7,6 +7,13 @@ from rank_bm25 import BM25Okapi
 
 from .. import config
 from ..config import LLM_BASE_URL
+from ..grounded_qa import (
+    Fragment,
+    GroundedAnswer,
+    answer_grounded,
+    lmstudio_chat,
+    used_sources,
+)
 from ..primitives import _get_chunk_meta
 from ..query import _expand_query, split_query_terms
 from ..signs import _chunk_sign_score, _keyword_boost
@@ -190,9 +197,6 @@ def _dat_combine_results(sentence_results, dense_results, alpha, top_k=15):
 def search_dat_sentence_llm(hipporag, query, top_k=10):
     import time as _time
 
-    import httpx
-
-    api_url = LLM_BASE_URL.replace("/v1", "") if "/v1" in LLM_BASE_URL else LLM_BASE_URL
     t0 = _time.time()
     print("  DAT Sentence-level + LLM", flush=True)
     sentence_results = search_sentence_level(hipporag, query, top_k=30)
@@ -219,96 +223,34 @@ def search_dat_sentence_llm(hipporag, query, top_k=10):
         combined = sentence_results[:top_k]
     t4 = _time.time()
     print(f"  Combined: {len(combined)} рез. ({t4-t3:.1f}с)", flush=True)
-    chunks_text = ""
-    for i, r in enumerate(combined[:8], 1):
+    fragments = []
+    for r in combined[:8]:
         text = r[0] if isinstance(r, tuple) and len(r) > 0 else str(r)
         src = r[2] if isinstance(r, tuple) and len(r) > 2 else ""
         pg = r[3] if isinstance(r, tuple) and len(r) > 3 else 0
-        chunks_text += f"\n[Источник {i} - {src} стр.{pg}]\n{text[:1500]}\n"
-    answer = None
-    prompt_base = {
-        "model": config.LLM_NAME,
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "Ты \u2014 эксперт по астрологии и фэншуй. "
-                    "Ответь на вопрос, используя ТОЛЬКО текст источников.\n\n"
-                    "В тексте знаки зодиака сопоставляются с зонами квартиры через тире: "
-                    "\u00abЗНАК \u2014 ЗОНА\u00bb. Например: \u00abОвен \u2014 прихожая, ... \u2014 плита\u00bb.\n\n"
-                    "Таблица планет-управителей:\n"
-                    "Овен \u2192 Марс, Телец \u2192 Венера, Близнецы \u2192 Меркурий, Рак \u2192 Луна, "
-                    "Лев \u2192 Солнце, Дева \u2192 Меркурий, Весы \u2192 Венера, "
-                    "Скорпион \u2192 Плутон/Марс, Стрелец \u2192 Юпитер, "
-                    "Козерог \u2192 Сатурн, Водолей \u2192 Уран, Рыбы \u2192 Нептун\n\n"
-                    "Алгоритм:\n"
-                    "1. Найди \u00abЗНАК \u2014 ... ЗОНА\u00bb в источниках\n"
-                    "2. Определи планету-управителя знака\n"
-                    "3. Вывод: планета отвечает за зону\n"
-                    "4. Пример: \u00abОВЕН \u2014 плита\u00bb + Овен\u2192Марс \u2192 Марс отвечает за плиту\n"
-                    "5. Алгоритм знак→зона применяй ТОЛЬКО если вопрос про знак или зону. "
-                    "На остальные вопросы (книги, автор, издание, понятие) отвечай по "
-                    "источникам дословно — например, перечисли названия книг, если они там есть\n"
-                    "6. Если нужной информации в источниках действительно нет — напиши "
-                    "\u00abнет данных\u00bb"
-                ),
-            },
-            {"role": "user", "content": f"Вопрос: {query}\n\nИсточники:\n{chunks_text}"},
-        ],
-        "max_tokens": 2048,
-        "temperature": 0.15,
-    }
-    prompts_to_try = [
-        prompt_base,
-        {
-            "model": config.LLM_NAME,
-            "messages": [
-                {"role": "user", "content": f"Вопрос: {query}\n\nИсточники:\n{chunks_text}"}
-            ],
-            "max_tokens": 1024,
-            "temperature": 0.1,
-        },
-        {
-            "model": config.LLM_NAME,
-            "messages": [{"role": "user", "content": f"{query}\n\n{chunks_text[:500]}"}],
-            "max_tokens": 512,
-            "temperature": 0.1,
-        },
-    ]
-    for attempt, prompt in enumerate(prompts_to_try):
-        try:
-            resp = httpx.post(f"{api_url}/v1/chat/completions", json=prompt, timeout=300)
-            if resp.status_code == 200:
-                data = resp.json()
-                msg = data["choices"][0]["message"]
-                finish = data["choices"][0].get("finish_reason", "")
-                content = (msg.get("content") or "").strip()
-                if content:
-                    answer = content
-                    break
-                rc = msg.get("reasoning_content", "") or msg.get("reasoning", "") or ""
-                if rc:
-                    m = re.search(r"(?:Ответ|Answer)\s*:?\s*(.+)", rc, re.IGNORECASE | re.DOTALL)
-                    if m:
-                        answer = m.group(1).strip()
-                        break
-                    m = re.search(r"So the answer is:\s*(.+)", rc, re.IGNORECASE)
-                    if m:
-                        answer = m.group(1).strip()
-                        break
-                    lines = [l.strip() for l in rc.split("\n") if l.strip()]
-                    if lines:
-                        answer = lines[-1].strip("\"'").replace("**", "").strip()
-                        break
-                print(f"  LLM пусто: попытка {attempt+1}, finish={finish}", flush=True)
-        except Exception as e:
-            print(f"  LLM error (попытка {attempt+1}): {e}", flush=True)
+        fragments.append(
+            Fragment(
+                text=str(text)[:1500],
+                doc_title=src if isinstance(src, str) and src else "Источник",
+                page_num=pg if isinstance(pg, int) else 0,
+            )
+        )
 
+    llm_empty = False
+
+    def _chat(messages):
+        nonlocal llm_empty
+        raw = lmstudio_chat(messages, max_tokens=1024)
+        if not raw:
+            llm_empty = True
+        return raw
+
+    grounded = answer_grounded(query, fragments, chat=_chat)
     t5 = _time.time()
-    print(f"  LLM ответ: {len(answer or '')} симв. ({t5-t4:.1f}с)", flush=True)
+    print(f"  LLM ответ: {len(grounded.text)} симв. ({t5-t4:.1f}с)", flush=True)
     print(f"  Всего: {t5-t0:.1f}с", flush=True)
 
-    if not answer:
+    if llm_empty and grounded.abstained:
         # LLM-free fallback: извлекаем "ЗНАК — ЗОНА" из результатов и строим ответ
         SIGN_PLANET = {
             "овен": "Марс",
@@ -325,29 +267,38 @@ def search_dat_sentence_llm(hipporag, query, top_k=10):
             "рыбы": "Нептун",
         }
         best_match = None
-        # Берём sentence-level результаты (они точнее по смыслу)
-        for r in sentence_results:
-            txt = (r[0] if isinstance(r, tuple) and len(r) > 0 else str(r)).lower()
+        for fragment_id, fragment in enumerate(fragments, 1):
+            txt = fragment.text.lower()
             for sign, planet in SIGN_PLANET.items():
                 m = re.search(rf"{sign}\s*—\s*[^.]{{0,200}}?плит", txt)
                 if m:
-                    start = max(0, m.start() - 20)
-                    ctx = txt[start : m.end() + 30]
-                    best_match = (sign.capitalize(), planet, ctx)
+                    best_match = (sign.capitalize(), planet, fragment_id)
                     break
             if best_match:
                 break
         if best_match:
-            answer = f"По данным источников, за плиту отвечает планета {best_match[1]} (через знак {best_match[0]})."
+            grounded = GroundedAnswer(
+                text=(
+                    f"По данным источников, за плиту отвечает планета {best_match[1]} "
+                    f"(через знак {best_match[0]}) [{best_match[2]}]."
+                ),
+                used_citation_ids=[best_match[2]],
+            )
             print(f"  LLM-free fallback: {best_match[0]} \u2192 {best_match[1]}", flush=True)
         else:
             return combined[:top_k]
 
+    sources_text = used_sources(fragments, grounded.used_citation_ids)
+    retrieved_text = "\n\n".join(
+        f"[{i}] {fragment.doc_title}, стр. {fragment.page_num}\n{fragment.text}"
+        for i, fragment in enumerate(fragments, 1)
+    )
     result_text = (
-        f"=== ОТВЕТ ===\n\n{answer}\n\n"
+        f"=== ОТВЕТ ===\n\n{grounded.text}\n\n"
         f"=== МЕТОД ===\n"
         f"DAT Sentence-level + LLM | alpha={alpha} (sentence={s_score}/5, dense={d_score}/5)\n"
         f"Время: {t5-t0:.1f}с\n\n"
-        f"=== ИСТОЧНИКИ ===\n{chunks_text[:3000]}"
+        f"=== ИСТОЧНИКИ ===\n{sources_text}\n\n"
+        f"=== НАЙДЕННЫЕ ФРАГМЕНТЫ ===\n{retrieved_text[:3000]}"
     )
     return [(result_text, 999.0, 0, 0, 0)]

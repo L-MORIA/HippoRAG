@@ -6,6 +6,7 @@ from hipporag.utils.misc_utils import min_max_normalize
 
 from .. import config
 from ..config import LLM_BASE_URL
+from ..grounded_qa import Fragment, answer_grounded
 from ..query import _expand_query, split_query_terms
 from ..signs import _chunk_sign_score, _keyword_boost, _sign_in_query
 from .bm25_hybrid import search_bm25_hybrid_ru, search_rrf_context
@@ -183,62 +184,22 @@ def search_graphrag_agent(hipporag, query):
     if best_method == "Self-RAG" and best_results:
         return best_results[:1]
 
-    # --- Шаг 4: LLM формирует ответ ---
+    # --- Шаг 4: LLM формирует заземлённый ответ ---
     answer = None
     if best_results:
-        # Собираем текст
-        chunks_text = ""
-        for i, r in enumerate(best_results[:5]):
+        fragments = []
+        for r in best_results[:5]:
             doc = r[0] if isinstance(r, (list, tuple)) else str(r)
             src = r[2] if isinstance(r, (list, tuple)) and len(r) > 2 else ""
-            src_str = str(src) if src else ""
-            chunks_text += f"\n[Источник {i+1} {src_str}]\n{doc[:1000]}\n"
-
-        answer = None
-        try:
-            r = httpx.get(f"{api_url}/v1/models", timeout=3)
-            if r.status_code == 200:
-                prompt = {
-                    "model": config.LLM_NAME,
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": (
-                                "Ответь на вопрос на основе источников.\n\n"
-                                "АЛГОРИТМ:\n"
-                                "1. Найди в источниках прямые ответы и соответствия\n"
-                                "2. Для вопросов вида «какая планета отвечает за зону» — "
-                                "ищи «знаку соответствует зона» + «управитель знака — планета»\n"
-                                "3. Для вопросов «перечисли всё» — выведи полный список\n"
-                                "4. Для остальных вопросов (автор, книга, понятие) — приведи прямое "
-                                "содержание найденного, дословно как в источниках\n"
-                                "5. Если нужная информация есть, но сформулирована иначе, чем "
-                                "вопрос — приведи её. Отсутствием информации считай только "
-                                "полное отсутствие чего-либо по теме.\n"
-                                "6. Ссылайся на источники: [Источник 1]\n"
-                                "7. «нет данных» пиши ТОЛЬКО если в источниках действительно нет "
-                                "ничего по теме вопроса"
-                            ),
-                        },
-                        {
-                            "role": "user",
-                            "content": f"Вопрос: {query}\n\nИсточники:\n{chunks_text}",
-                        },
-                    ],
-                    "max_tokens": 2048,
-                    "temperature": 0.15,
-                }
-                resp = httpx.post(f"{api_url}/v1/chat/completions", json=prompt, timeout=300)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    msg = data["choices"][0]["message"]
-                    answer = (msg.get("content") or "").strip()
-                    if not answer and msg.get("reasoning_content"):
-                        rc = msg["reasoning_content"]
-                        lines = [l.strip() for l in rc.split("\n") if l.strip()]
-                        answer = lines[-1].strip("\"'").replace("**", "") if lines else answer
-        except:
-            pass
+            page = r[3] if isinstance(r, (list, tuple)) and len(r) > 3 else 0
+            fragments.append(
+                Fragment(
+                    text=str(doc)[:1500],
+                    doc_title=src if isinstance(src, str) and src else "Источник",
+                    page_num=int(page) if isinstance(page, int) else 0,
+                )
+            )
+        answer = answer_grounded(query, fragments).text
 
     # Раньше функция заканчивалась здесь без return: маршрутизация, каскадный
     # поиск и ответ LLM выполнялись, а результат выбрасывался — режим 19 всегда

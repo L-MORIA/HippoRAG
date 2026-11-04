@@ -2,8 +2,7 @@
 
 import numpy as np
 
-from .. import config
-from ..config import LLM_BASE_URL
+from ..grounded_qa import Fragment, answer_grounded, used_sources
 from ..primitives import _build_bm25, _embedding_scores, _get_chunk_meta
 from ..query import _expand_query, split_query_terms
 from ..signs import _chunk_sign_score, _keyword_boost
@@ -20,9 +19,6 @@ def search_self_rag(hipporag, query, top_k=30, candidate_pool=200):
     Теперь кандидаты — объединение BM25-топа и dense-топа, а ранжирование
     считается по RRF: при отсутствии эмбеддингов поведение остаётся прежним.
     """
-    import httpx
-
-    api_url = LLM_BASE_URL.replace("/v1", "") if "/v1" in LLM_BASE_URL else LLM_BASE_URL
     _, q_lower = split_query_terms(query)
     terms, _ = split_query_terms(query)
 
@@ -87,70 +83,26 @@ def search_self_rag(hipporag, query, top_k=30, candidate_pool=200):
         if len(merged) >= top_k:
             break
 
-    # Шаг 2: собираем текст чанков для LLM
-    chunks_text = ""
-    for i, (text, source, mp, xp) in enumerate(merged, 1):
-        chunks_text += f"\n[Источник {i} — {source} стр.{mp}-{xp}]\n{text[:1200]}\n"
+    # Шаг 2: единый заземлённый ответ по нумерованным фрагментам
+    fragments = [
+        Fragment(
+            text=text[:1200],
+            doc_title=source,
+            page_num=mp,
+            section=f"стр. {mp}-{xp}",
+        )
+        for text, source, mp, xp in merged
+    ]
+    grounded = answer_grounded(query, fragments)
 
-    # Шаг 3: LLM
-    answer = None
-    try:
-        r_health = httpx.get(f"{api_url}/v1/models", timeout=3)
-        if r_health.status_code == 200:
-            prompt = {
-                "model": config.LLM_NAME,
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": (
-                            "Ответь на вопрос читателя, используя ТОЛЬКО текст источников.\n\n"
-                            "АЛГОРИТМ:\n"
-                            "1. Вопрос может быть ЛЮБОЙ темы: автор, книга, издание, понятие, "
-                            "знак зодиака, зона дома. Определи тип вопроса и найди прямые ответы "
-                            "в источниках.\n"
-                            "2. Для вопросов вида «какая планета отвечает за зону» — "
-                            "ищи «знаку соответствует зона» + «управитель знака — планета»\n"
-                            "3. Для остальных вопросов — приведи прямое содержание найденного: "
-                            "названия, формулировки, факты, дословно как в источниках\n"
-                            "4. Если в источниках есть нужная информация, но она сформулирована "
-                            "ИНАЧЕ, чем вопрос (например «Психологический фэншуй» вместо "
-                            "«название книги») — приведи её как ответ. Не считай это отсутствием "
-                            "информации.\n"
-                            "5. Для вопросов «перечисли всё» — выведи полный список\n"
-                            "6. Ссылайся на источники: [Источник 1]\n"
-                            "7. «нет данных» пиши ТОЛЬКО если в источниках действительно нет "
-                            "ничего по теме вопроса. Отсутствие ГОТОВОЙ формулировки "
-                            "не равно отсутствию информации: если в источниках есть нужные "
-                            "слова, факты и соответствия, из которых ответ выводится — "
-                            "составь и дай ответ, а не отказ"
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Вопрос: {query}\n\n"
-                            f"Источники:\n{chunks_text}\n\n"
-                            f"Ответь на основе источников."
-                        ),
-                    },
-                ],
-                "max_tokens": 2048,
-                "temperature": 0.15,
-            }
-            resp = httpx.post(f"{api_url}/v1/chat/completions", json=prompt, timeout=300)
-            if resp.status_code == 200:
-                data = resp.json()
-                msg = data["choices"][0]["message"]
-                answer = (msg.get("content") or "").strip()
-                if not answer and msg.get("reasoning_content"):
-                    rc = msg["reasoning_content"]
-                    lines = [l.strip() for l in rc.split("\n") if l.strip()]
-                    answer = lines[-1].strip("\"'").replace("**", "") if lines else answer
-    except Exception:
-        pass
-
-    if not answer:
-        return [(scored[0][0], scored[0][1], "", 0, 0, 0)]
-
-    result_text = f"=== ОТВЕТ ===\n\n{answer}\n\n=== ИСТОЧНИКИ ===\n{chunks_text[:3000]}"
+    sources_text = used_sources(fragments, grounded.used_citation_ids)
+    retrieved_text = "\n\n".join(
+        f"[{i}] {fragment.doc_title}, стр. {fragment.page_num}\n{fragment.text}"
+        for i, fragment in enumerate(fragments, 1)
+    )
+    result_text = (
+        f"=== ОТВЕТ ===\n\n{grounded.text}\n\n"
+        f"=== ИСТОЧНИКИ ===\n{sources_text}\n\n"
+        f"=== НАЙДЕННЫЕ ФРАГМЕНТЫ ===\n{retrieved_text[:3000]}"
+    )
     return [(result_text, 999.0, 0, 0, 0)]
