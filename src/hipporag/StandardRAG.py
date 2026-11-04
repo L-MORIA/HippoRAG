@@ -17,7 +17,9 @@ from .prompts.prompt_template_manager import PromptTemplateManager
 from .qa.grounding import (
     ABSTAIN_TEXT,
     GroundedAnswer,
+    build_repair_messages,
     format_fragments,
+    needs_citation_repair,
     parse_grounded_response,
 )
 from .utils.config_utils import BaseConfig, build_working_dir
@@ -381,11 +383,11 @@ class StandardRAG:
             all_metadata[index] = metadata
 
         # Process responses and extract predicted answers.
-        queries_solutions = []
         strict = self.global_config.qa_strict_grounding
-        for query_solution_idx, query_solution in tqdm(
-            enumerate(queries), desc="Extraction Answers from LLM Response"
-        ):
+        grounded_results: List[GroundedAnswer] = []
+        retry_pending: List[Tuple[int, List[Dict]]] = []
+
+        for query_solution_idx, query_solution in enumerate(queries):
             if all_qa_messages[query_solution_idx] is None:
                 grounded = GroundedAnswer(text=ABSTAIN_TEXT, abstained=True)
                 all_response_message[query_solution_idx] = ABSTAIN_TEXT
@@ -395,7 +397,46 @@ class StandardRAG:
                     fragment_count=all_fragment_counts[query_solution_idx],
                     strict=strict,
                 )
+                if needs_citation_repair(grounded):
+                    retry_pending.append(
+                        (
+                            query_solution_idx,
+                            build_repair_messages(
+                                all_qa_messages[query_solution_idx],
+                                all_response_message[query_solution_idx],
+                            ),
+                        )
+                    )
+            grounded_results.append(grounded)
 
+        # Ровно один repair-retry на вопрос: только для ответов без валидных
+        # ссылок. Повтор идёт отдельной пачкой, чтобы не терять батчинг.
+        if retry_pending:
+            logger.info(
+                "QA repair-retry: %d из %d ответов без валидных ссылок",
+                len(retry_pending),
+                len(queries),
+            )
+            retry_results = [
+                self.llm_model.infer(message)
+                for _, message in tqdm(retry_pending, desc="QA Repair")
+            ]
+            for (query_solution_idx, _), (response, metadata, _) in zip(
+                retry_pending, retry_results
+            ):
+                all_response_message[query_solution_idx] = response
+                all_metadata[query_solution_idx] = metadata
+                grounded_results[query_solution_idx] = parse_grounded_response(
+                    response,
+                    fragment_count=all_fragment_counts[query_solution_idx],
+                    strict=strict,
+                )
+
+        queries_solutions = []
+        for query_solution_idx, query_solution in tqdm(
+            enumerate(queries), desc="Extraction Answers from LLM Response"
+        ):
+            grounded = grounded_results[query_solution_idx]
             query_solution.answer = grounded.text
             query_solution.abstained = grounded.abstained
             query_solution.grounding_errors = grounded.errors
@@ -406,6 +447,14 @@ class StandardRAG:
                 for citation_id in grounded.used_citation_ids
                 if 1 <= citation_id <= len(citations)
             ]
+            logger.info(
+                "QA grounding: query=%d fragments=%d used=%d abstained=%s errors=%s",
+                query_solution_idx,
+                all_fragment_counts[query_solution_idx],
+                len(query_solution.used_citations),
+                grounded.abstained,
+                grounded.errors,
+            )
 
             queries_solutions.append(query_solution)
 

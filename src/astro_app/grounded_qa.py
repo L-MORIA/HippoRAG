@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence
 
@@ -15,7 +16,9 @@ from hipporag.prompts.templates.rag_qa_astrology import rag_qa_system
 from hipporag.qa.grounding import (
     ABSTAIN_TEXT,
     GroundedAnswer,
+    build_repair_messages,
     format_fragments,
+    needs_citation_repair,
     parse_grounded_response,
 )
 from hipporag.utils.custom_types import Citation
@@ -23,6 +26,8 @@ from hipporag.utils.custom_types import Citation
 from .config import LLM_BASE_URL, LLM_NAME
 
 ChatFn = Callable[[List[Dict[str, str]]], str]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -67,8 +72,27 @@ def answer_grounded(
         return GroundedAnswer(text=ABSTAIN_TEXT, abstained=True)
 
     chat_fn = chat or lmstudio_chat
-    raw = chat_fn(build_messages(question, fragments))
-    return parse_grounded_response(raw, fragment_count=len(fragments), strict=strict)
+    messages = build_messages(question, fragments)
+    raw = chat_fn(messages)
+    grounded = parse_grounded_response(raw, fragment_count=len(fragments), strict=strict)
+
+    # Ровно один repair-retry: модель могла ответить по существу, но забыть
+    # inline-ссылки. Второй запрос не повторяем, чтобы не зациклиться.
+    if needs_citation_repair(grounded):
+        retried = chat_fn(build_repair_messages(messages, raw))
+        if retried and retried.strip():
+            grounded = parse_grounded_response(
+                retried, fragment_count=len(fragments), strict=strict
+            )
+
+    logger.info(
+        "Q&A grounding: fragments=%d used=%d abstained=%s errors=%s",
+        len(fragments),
+        len(grounded.used_citation_ids),
+        grounded.abstained,
+        grounded.errors,
+    )
+    return grounded
 
 
 def used_sources(fragments: Sequence[Fragment], citation_ids: Sequence[int]) -> str:

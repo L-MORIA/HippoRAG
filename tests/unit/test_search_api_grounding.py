@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import logging
 
 from hipporag.qa.grounding import ABSTAIN_TEXT
 from hipporag.search_api import server
@@ -83,3 +84,39 @@ def test_search_grounding_errors_lower_confidence(monkeypatch):
 
     assert response.data.citations[0].doc_title == "Книга A"
     assert response.data.confidence == 0.5
+
+
+def test_search_logs_grounding_metrics_and_p95(monkeypatch, caplog):
+    used = Citation(source_file="a.pdf", doc_title="Книга A", page_num=1)
+    solution = QuerySolution(
+        question="От чего работает прибор?",
+        answer="Прибор работает от батареи AA [1].",
+        docs=["фрагмент один"],
+        citations=[used],
+        used_citations=[used],
+        abstained=False,
+        grounding_errors=[],
+    )
+    server._GROUNDING_LATENCIES_MS.clear()
+    try:
+        with caplog.at_level(logging.INFO, logger=server.__name__):
+            _call_search(monkeypatch, solution)
+
+        assert "abstained=False" in caplog.text
+        assert "used_citations=1" in caplog.text
+        assert "retrieved_docs=1" in caplog.text
+        assert "latency_ms=" in caplog.text
+        assert "p95_ms=" in caplog.text
+        assert server.grounding_p95_latency_ms() >= 0.0
+    finally:
+        server._GROUNDING_LATENCIES_MS.clear()
+
+
+def test_grounding_p95_latency_uses_recent_window():
+    server._GROUNDING_LATENCIES_MS.clear()
+    try:
+        for value in range(1, 101):
+            server._GROUNDING_LATENCIES_MS.append(float(value))
+        assert server.grounding_p95_latency_ms() == 95.0
+    finally:
+        server._GROUNDING_LATENCIES_MS.clear()

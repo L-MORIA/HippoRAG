@@ -23,6 +23,18 @@ from ..utils.custom_types import Citation
 
 ABSTAIN_TEXT = "В предоставленных фрагментах нет ответа на этот вопрос."
 
+#: Один repair-retry, если модель ответила без валидных inline-ссылок.
+REPAIR_INSTRUCTION = (
+    "Предыдущий ответ не прошёл проверку заземления: в нём нет валидных ссылок "
+    "на переданные фрагменты. Повтори ответ строго по формату:\n"
+    "ОТВЕТ: <ответ; после каждого утверждения — [n]>\n"
+    "ИСТОЧНИКИ: <номера через запятую>\n"
+    "ОТКАЗ: <да|нет>\n"
+    "Используй только номера от 1 до числа переданных фрагментов. "
+    "Не добавляй факты, которых нет во фрагментах. "
+    "Если ответа нет, верни ровно текст отказа и «ОТКАЗ: да»."
+)
+
 # [1], [1][2], [1, 2], [1,2]
 _CITATION_GROUP_RE = re.compile(r"\[\s*([0-9,\s]+?)\s*\]")
 _ANSWER_RE = re.compile(
@@ -75,6 +87,36 @@ def format_fragments(
             header = f"[{index}] Источник: не указан"
         blocks.append(f"{header}\n{passage.strip()}")
     return "\n\n".join(blocks)
+
+
+def needs_citation_repair(grounded: GroundedAnswer) -> bool:
+    """Нужен ли один повтор: модель ответила, но не дала валидных ссылок.
+
+    ``no_inline_citations`` и ``no_valid_citations`` — разные ветки парсера,
+    но обе означают одно: утверждение не привязано к фрагменту. Повторяем
+    только их; ``uncited_sentences`` и ``source_mismatch`` не чинятся вторым
+    запросом и остаются диагностикой.
+    """
+    if grounded.abstained and not grounded.errors:
+        return False
+    return any(
+        error == "no_inline_citations"
+        or error == "no_valid_citations"
+        or error.startswith("no_valid_citations:")
+        for error in grounded.errors
+    )
+
+
+def build_repair_messages(messages: Sequence[dict], previous_response: str) -> list[dict]:
+    """Добавляет к диалогу предыдущий ответ и repair-инструкцию.
+
+    Ровно один дополнительный ход пользователя: вызывающий код обязан
+    ограничить число повторов одним.
+    """
+    repair = [dict(message) for message in messages]
+    repair.append({"role": "assistant", "content": previous_response})
+    repair.append({"role": "user", "content": REPAIR_INSTRUCTION})
+    return repair
 
 
 def _extract_ids(text: str) -> list[int]:

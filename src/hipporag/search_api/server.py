@@ -2,6 +2,7 @@ import logging
 import os
 import secrets
 import time
+from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List, Optional
@@ -29,6 +30,20 @@ logger = logging.getLogger(__name__)
 # Глобальные переменные
 hipporag: Optional[HippoRAG] = None
 start_time: float = time.time()
+
+# D-11: последние задержки /search для p95 в логах. Храним только числа,
+# без вопросов и ответов, чтобы не раздувать память и не логировать PII.
+_GROUNDING_LATENCIES_MS: deque = deque(maxlen=200)
+
+
+def grounding_p95_latency_ms() -> float:
+    """p95 по последним запросам; 0.0, пока нет данных."""
+    if not _GROUNDING_LATENCIES_MS:
+        return 0.0
+    ordered = sorted(_GROUNDING_LATENCIES_MS)
+    index = min(len(ordered) - 1, int(round(0.95 * (len(ordered) - 1))))
+    return round(ordered[index], 1)
+
 
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "200"))
 API_KEY = os.getenv("API_KEY")
@@ -233,6 +248,18 @@ async def search(request: SearchRequest):
             abstained=result.abstained,
             grounding_errors=result.grounding_errors,
             processing_time=processing_time,
+        )
+
+        _GROUNDING_LATENCIES_MS.append(processing_time * 1000)
+        logger.info(
+            "search: abstained=%s grounding_errors=%s used_citations=%d "
+            "retrieved_docs=%d latency_ms=%.1f p95_ms=%.1f",
+            result.abstained,
+            result.grounding_errors,
+            len(result.used_citations),
+            len(result.docs),
+            processing_time * 1000,
+            grounding_p95_latency_ms(),
         )
 
         return SearchResponse(data=search_result)
