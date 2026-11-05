@@ -2209,6 +2209,15 @@ baseline зафиксирован; для LLM-режимов есть отдел
 
 **Оценка:** 2–4 дня, включая перезамер.
 
+> **🟡 Реализация 2026-11-05; замер ожидает индекс и LM Studio.**
+> Page-level ретрив (`src/astro_app/page_retrieval.py`) и page recall@k с
+> порогом 80 % (`scripts/eval_grounding.py --require-page-recall`) готовы,
+> unit-тесты — 420 passed, 1 skipped. Адаптер по умолчанию отдаёт страницы;
+> чанковый baseline H2-6 — `ASTRO_RETRIEVER_PAGE_LEVEL=0`. Реальный
+> page recall@5 **не снят**: в рабочей копии нет `outputs/astrology_test` и
+> запущенного LM Studio, поэтому приёмка пока не подтверждена. Детали и
+> команды — [H1_6_PAGE_RETRIEVAL_2026-11-05.md](./H1_6_PAGE_RETRIEVAL_2026-11-05.md).
+
 ---
 
 ### 9.3. H2 — «Продукт» (3–6 недель, P1/P2)

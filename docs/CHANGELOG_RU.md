@@ -1,5 +1,37 @@
 # История изменений HippoRAG
 
+## 2026-11-05 — H1-6: page-level retrieval
+
+### Добавлено
+- `src/astro_app/page_retrieval.py` — page-level гибридный ретрив: чанки
+  группируются по `(source_file, page_num)`, BM25 считается по полному тексту
+  страницы, dense-канал берёт максимум по чанкам, каналы сливаются RRF,
+  top-50 переранжируется русским cross-encoder. Текст страницы обрезается
+  вокруг лучшего чанка; реранкеру передаётся окно 512 символов вокруг него.
+- `search_bm25_hybrid_ru_pages()` в `src/astro_app/modes/bm25_hybrid.py` —
+  page-level вариант режима 5.
+- `page recall@k`, `page coverage@k` и порог `page_recall_at_5 ≥ 0.80` в
+  `scripts/eval_grounding.py`; флаг `--require-page-recall`, page@5 в
+  построчной таблице и в сравнении прогонов.
+- `tests/unit/test_page_retrieval.py` — 12 тестов page-индекса и гибридного
+  поиска.
+
+### Изменено
+- `scripts/grounding_astro_retriever.py` по умолчанию отдаёт страницы, а не
+  чанки. Чанковый baseline H2-6 остаётся доступен через
+  `ASTRO_RETRIEVER_PAGE_LEVEL=0`.
+- Page recall считается по определению H2-6 — «хотя бы одна gold-страница в
+  top-k», поэтому baseline 56,5 % сравним напрямую. Дополнительно считается
+  coverage по всем gold-страницам.
+
+### Тесты
+- `pytest tests/unit -m unit -q`: **420 passed, 1 skipped**.
+
+### Ожидает замера
+Реальный page recall@5 и перезамер H2-6 не сняты: в рабочей копии нет
+`outputs/astrology_test`, PDF-корпуса и LM Studio. Команды и статус —
+в `docs/H1_6_PAGE_RETRIEVAL_2026-11-05.md`.
+
 ## 2026-11-05 — H2-6: заземление Q&A
 
 ### Добавлено

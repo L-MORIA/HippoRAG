@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Оценка заземления Q&A на golden set (H2-6, D-9/D-10).
+"""Оценка заземления Q&A на golden set (H2-6, H1-6, D-9/D-10).
 
 Скрипт отвечает на один вопрос: **можно ли доверять ответу** — то есть
 отказывается ли система, когда ответа нет, и ссылается ли она на те
@@ -14,6 +14,12 @@
 * marker validity — все ли ``[n]`` попадают в переданные фрагменты;
 * uncited sentence rate — доля ответов с предложениями без ссылки;
 * answer accuracy — покрытие ключевых терминов эталона;
+* page recall@k — доля answerable-вопросов, у которых хотя бы одна размеченная
+  страница попала в первые k ``retrieved`` (H1-6; то же определение, что в
+  H2-6, поэтому baseline 56,5 % сравним); считается, только если предсказание
+  содержит ``retrieved``;
+* page coverage@k — доля всех размеченных страниц в первых k (диагностика для
+  вопросов с несколькими источниками);
 * p50/p95 latency, если предсказания её содержат.
 
 Режимы:
@@ -33,12 +39,18 @@
     python scripts/eval_grounding.py --stub-llm --stub-mode grounded \
         --out-json /tmp/grounding_stub.json --out-md /tmp/grounding_stub.md
 
+    # 5. Замерить H1-6: page recall@5 должен быть >= 80 %
+    python scripts/eval_grounding.py --run \
+        --retriever grounding_astro_retriever:retrieve \
+        --require-page-recall
+
 Формат предсказания (JSONL, по строке на вопрос)::
 
     {"id": "a01-astro-author-edition",
      "answer": "Ирина Максимова, 2025 [1].",
      "abstained": false,
      "citations": [{"doc_title": "Астрофэншуй квартиры.pdf", "page_num": 2}],
+     "retrieved": [{"doc_title": "Астрофэншуй квартиры.pdf", "page_num": 2}],
      "fragment_count": 3,
      "grounding_errors": [],
      "latency_ms": 812.0}
@@ -157,6 +169,8 @@ class Prediction:
     errors: List[str] = field(default_factory=list)
     latency_ms: Optional[float] = None
     retrieved: List[SourceRef] = field(default_factory=list)
+    #: Был ли в предсказании блок ``retrieved`` (иначе page recall не измерим).
+    retrieved_provided: bool = False
 
 
 @dataclass
@@ -403,6 +417,7 @@ def parse_prediction(raw: Any, where: str) -> Prediction:
         _prediction_source(item, f"{where}.citations[{index}]")
         for index, item in enumerate(citations_raw)
     ]
+    retrieved_provided = "retrieved" in raw
     retrieved_raw = raw.get("retrieved", [])
     if not isinstance(retrieved_raw, list):
         raise GoldenSetError(f"{where}: retrieved должен быть списком")
@@ -434,6 +449,7 @@ def parse_prediction(raw: Any, where: str) -> Prediction:
         errors=list(errors_raw),
         latency_ms=float(latency) if latency is not None else None,
         retrieved=retrieved,
+        retrieved_provided=retrieved_provided,
     )
 
 
@@ -512,6 +528,45 @@ def answer_is_correct(prediction: Prediction, question: GoldenQuestion) -> bool:
     return all(_term_present(term, body) for term in question.gold_terms)
 
 
+def page_recall_at_k(
+    prediction: Prediction,
+    question: GoldenQuestion,
+    k: int,
+) -> Optional[float]:
+    """1.0, если хотя бы одна gold-страница попала в первые ``k``, иначе 0.0.
+
+    Это определение H2-6: «доля вопросов, у которых размеченная страница
+    попала в контекст». Оно совпадает с ``evaluation.recall_at_k`` (H1-1/H1-3),
+    поэтому цифры H1-6 сравнимы с baseline 56,5 % (13/23).
+
+    Возвращает ``None``, если вопрос не answerable или в предсказании не было
+    блока ``retrieved``: тогда метрика неприменима, а не «ноль».
+    """
+    coverage = page_coverage_at_k(prediction, question, k)
+    if coverage is None:
+        return None
+    return 1.0 if coverage > 0 else 0.0
+
+
+def page_coverage_at_k(
+    prediction: Prediction,
+    question: GoldenQuestion,
+    k: int,
+) -> Optional[float]:
+    """Доля всех gold-страниц в первых ``k`` записях ``retrieved``.
+
+    Дополнительная диагностика для вопросов с несколькими источниками: recall
+    отвечает «нашлась ли хоть одна страница», coverage — «насколько полно».
+    """
+    if not question.answerable or not prediction.retrieved_provided:
+        return None
+    gold = {source_key(source) for source in question.gold_sources}
+    if not gold:
+        return None
+    retrieved = {source_key(source) for source in prediction.retrieved[:k]}
+    return len(gold & retrieved) / len(gold)
+
+
 def _mean(values: Sequence[float]) -> Optional[float]:
     return round(statistics.fmean(values), 4) if values else None
 
@@ -554,6 +609,8 @@ def evaluate(
     answered_with_uncited = 0
     answered_count = 0
     latencies: List[float] = []
+    page_recalls: Dict[int, List[float]] = {5: [], 10: [], 50: []}
+    page_coverages: Dict[int, List[float]] = {5: [], 10: [], 50: []}
 
     for question in golden.items:
         prediction = predictions[question.id]
@@ -561,6 +618,14 @@ def evaluate(
         cited = {source_key(source) for source in prediction.citations}
         gold = {source_key(source) for source in question.gold_sources}
         intersection = cited & gold
+
+        for k in page_recalls:
+            recall = page_recall_at_k(prediction, question, k)
+            coverage = page_coverage_at_k(prediction, question, k)
+            if recall is not None:
+                page_recalls[k].append(recall)
+            if coverage is not None:
+                page_coverages[k].append(coverage)
 
         marker = marker_counts(prediction)
         if prediction.latency_ms is not None:
@@ -576,6 +641,9 @@ def evaluate(
             "gold_sources": len(gold),
             "errors": list(prediction.errors),
         }
+        for k in page_recalls:
+            row[f"page_recall_at_{k}"] = page_recall_at_k(prediction, question, k)
+            row[f"page_coverage_at_{k}"] = page_coverage_at_k(prediction, question, k)
 
         if question.answerable:
             if answered:
@@ -655,6 +723,11 @@ def evaluate(
             round(answered_with_uncited / answered_count, 4) if answered_count else None
         ),
         "answer_accuracy": (round(correct_answers / n_answerable, 4) if n_answerable else None),
+        "page_recall_at_5": _mean(page_recalls[5]),
+        "page_recall_at_10": _mean(page_recalls[10]),
+        "page_recall_at_50": _mean(page_recalls[50]),
+        "page_coverage_at_5": _mean(page_coverages[5]),
+        "page_recall_measured": bool(page_recalls[5]),
         "p50_latency_ms": _percentile(latencies, 0.5),
         "p95_latency_ms": _percentile(latencies, 0.95),
     }
@@ -674,10 +747,19 @@ THRESHOLDS: Dict[str, Tuple[str, float]] = {
 }
 
 
-def check_thresholds(metrics: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+#: Порог H1-6: page recall@5 на 23 answerable вопросах.
+RETRIEVAL_THRESHOLDS: Dict[str, Tuple[str, float]] = {
+    "page_recall_at_5": (">=", 0.80),
+}
+
+
+def _check_thresholds(
+    metrics: Dict[str, Any],
+    thresholds: Dict[str, Tuple[str, float]],
+) -> Dict[str, Dict[str, Any]]:
     """Сверяет метрики с порогами; None считается провалом."""
     result: Dict[str, Dict[str, Any]] = {}
-    for name, (operator, threshold) in THRESHOLDS.items():
+    for name, (operator, threshold) in thresholds.items():
         value = metrics.get(name)
         if value is None:
             passed = False
@@ -692,6 +774,18 @@ def check_thresholds(metrics: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
             "passed": passed,
         }
     return result
+
+
+def check_thresholds(metrics: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Пороги генерации/заземления (H2-6)."""
+    return _check_thresholds(metrics, THRESHOLDS)
+
+
+def check_retrieval_thresholds(metrics: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Пороги ретрива (H1-6); пусто, если page recall не измерен."""
+    if metrics.get("page_recall_at_5") is None:
+        return {}
+    return _check_thresholds(metrics, RETRIEVAL_THRESHOLDS)
 
 
 def _question_ok(row: Dict[str, Any]) -> bool:
@@ -716,7 +810,7 @@ def compare_runs(
 ) -> Dict[str, Any]:
     """Сравнивает две сводки: метрики и построчные изменения."""
     metric_delta: Dict[str, Any] = {}
-    for name in THRESHOLDS:
+    for name in list(THRESHOLDS) + list(RETRIEVAL_THRESHOLDS):
         before = baseline["metrics"].get(name)
         current = after["metrics"].get(name)
         metric_delta[name] = {
@@ -885,6 +979,7 @@ def run_questions(
                 abstained=not question.answerable,
                 citations=[],
                 retrieved=[SourceRef(item.doc_title, item.page_num) for item in fragments],
+                retrieved_provided=True,
                 fragment_count=len(fragments),
                 errors=[],
                 latency_ms=round((time.perf_counter() - started) * 1000, 2),
@@ -899,6 +994,7 @@ def run_questions(
                 abstained=True,
                 citations=[],
                 retrieved=[SourceRef(item.doc_title, item.page_num) for item in fragments],
+                retrieved_provided=True,
                 fragment_count=len(fragments),
                 errors=[],
                 latency_ms=round((time.perf_counter() - started) * 1000, 2),
@@ -920,6 +1016,7 @@ def run_questions(
                 abstained=grounded.abstained,
                 citations=used,
                 retrieved=[SourceRef(item.doc_title, item.page_num) for item in fragments],
+                retrieved_provided=True,
                 fragment_count=len(fragments),
                 errors=grounded.errors,
                 latency_ms=round((time.perf_counter() - started) * 1000, 2),
@@ -994,6 +1091,7 @@ def format_markdown(
         "marker_validity": "Marker validity",
         "uncited_sentence_rate": "Uncited sentence rate",
         "answer_accuracy": "Answer accuracy",
+        "page_recall_at_5": "Page recall@5 (H1-6)",
     }
     for name, check in report["thresholds"].items():
         value = check["value"]
@@ -1017,6 +1115,34 @@ def format_markdown(
             "",
             f"Латентность: p50 {metrics['p50_latency_ms']} мс, "
             f"p95 {metrics['p95_latency_ms']} мс.",
+        ]
+
+    retrieval = report.get("retrieval_thresholds") or {}
+    if retrieval:
+        lines += [
+            "",
+            "## Retrieval (H1-6)",
+            "",
+            "| Метрика | Значение | Порог | Статус |",
+            "|---|---:|---:|---|",
+        ]
+        for name, check in retrieval.items():
+            lines.append(
+                f"| {labels.get(name, name)} | "
+                f"{_fmt(check['value'], percent=True)} | "
+                f"{check['operator']} {_fmt(check['threshold'], percent=True)} | "
+                f"{'✅' if check['passed'] else '❌'} |"
+            )
+        lines += [
+            "",
+            f"Page recall@10: {_fmt(metrics.get('page_recall_at_10'), percent=True)}, "
+            f"@50: {_fmt(metrics.get('page_recall_at_50'), percent=True)}; "
+            f"page coverage@5: {_fmt(metrics.get('page_coverage_at_5'), percent=True)}.",
+        ]
+    elif metrics.get("page_recall_measured") is False:
+        lines += [
+            "",
+            "Page recall не измерен: в предсказаниях нет блока `retrieved`.",
         ]
 
     comparison = report.get("comparison")
@@ -1046,8 +1172,8 @@ def format_markdown(
         "",
         "## Вопросы",
         "",
-        "| id | answerable | ответ | цитаты P/R | accuracy | ошибки |",
-        "|---|---|---|---|---|---|",
+        "| id | answerable | ответ | page@5 | цитаты P/R | accuracy | ошибки |",
+        "|---|---|---|---|---|---|---|",
     ]
     for row in report["questions"]:
         precision = row.get("citation_precision")
@@ -1058,9 +1184,12 @@ def format_markdown(
             else "—"
         )
         accuracy = row.get("correct")
+        page_hit = row.get("page_recall_at_5")
+        page_text = "✅" if page_hit == 1.0 else ("❌" if page_hit is not None else "—")
         lines.append(
             f"| `{row['id']}` | {'да' if row['answerable'] else 'нет'} | "
-            f"{'ответ' if row['answered'] else 'отказ'} | {citation_text} | "
+            f"{'ответ' if row['answered'] else 'отказ'} | {page_text} | "
+            f"{citation_text} | "
             f"{'✅' if accuracy else ('❌' if accuracy is not None else '—')} | "
             f"{', '.join(row['errors']) or '—'} |"
         )
@@ -1108,6 +1237,7 @@ def build_report(
         "quality_measurement": not mode.startswith("stub"),
         "metrics": result["metrics"],
         "thresholds": check_thresholds(result["metrics"]),
+        "retrieval_thresholds": check_retrieval_thresholds(result["metrics"]),
         "questions": result["questions"],
     }
     if baseline is not None:
@@ -1138,6 +1268,19 @@ def _print_summary(report: Dict[str, Any]) -> None:
         f"Uncited: {_fmt(metrics['uncited_sentence_rate'], percent=True)} | "
         f"Accuracy: {_fmt(metrics['answer_accuracy'], percent=True)}"
     )
+    if metrics.get("page_recall_at_5") is not None:
+        print(
+            f"Page recall: @5 {_fmt(metrics['page_recall_at_5'], percent=True)} | "
+            f"@10 {_fmt(metrics['page_recall_at_10'], percent=True)} | "
+            f"@50 {_fmt(metrics['page_recall_at_50'], percent=True)} | "
+            f"coverage@5 {_fmt(metrics['page_coverage_at_5'], percent=True)}"
+        )
+    for name, check in (report.get("retrieval_thresholds") or {}).items():
+        print(
+            f"{name}: {_fmt(check['value'], percent=True)} "
+            f"(порог {check['operator']} {_fmt(check['threshold'], percent=True)}) — "
+            f"{'выполнен' if check['passed'] else 'не выполнен'}"
+        )
     failed = [name for name, check in report["thresholds"].items() if not check["passed"]]
     if failed:
         print("Пороги не выполнены: " + ", ".join(failed))
@@ -1176,9 +1319,14 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="куда сохранить предсказания режима --run/--stub-llm",
     )
     parser.add_argument(
+        "--require-page-recall",
+        action="store_true",
+        help="требовать page recall@5 >= 0.80 (H1-6); ошибка, если метрика не измерена",
+    )
+    parser.add_argument(
         "--no-thresholds",
         action="store_true",
-        help="не возвращать код 1 при провале порогов",
+        help="не возвращать код 1 при провале порогов генерации",
     )
     parser.add_argument(
         "--no-distribution-check",
@@ -1257,6 +1405,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             baseline_path=args.baseline_label or args.baseline,
         )
         _print_summary(report)
+        metrics = report["metrics"]
 
         if args.out_json:
             Path(args.out_json).parent.mkdir(parents=True, exist_ok=True)
@@ -1268,9 +1417,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             Path(args.out_md).parent.mkdir(parents=True, exist_ok=True)
             Path(args.out_md).write_text(format_markdown(golden, report), encoding="utf-8")
 
-        if args.no_thresholds:
-            return 0
-        return 0 if all(check["passed"] for check in report["thresholds"].values()) else 1
+        failed: List[str] = []
+        if not args.no_thresholds:
+            failed.extend(
+                name for name, check in report["thresholds"].items() if not check["passed"]
+            )
+        if args.require_page_recall:
+            if metrics.get("page_recall_at_5") is None:
+                raise GoldenSetError(
+                    "--require-page-recall: page recall@5 не измерен — "
+                    "в предсказаниях нет блока `retrieved`"
+                )
+            failed.extend(
+                name
+                for name, check in report["retrieval_thresholds"].items()
+                if not check["passed"]
+            )
+        if failed:
+            print("Не выполнено: " + ", ".join(failed), file=sys.stderr)
+            return 1
+        return 0
     except GoldenSetError as exc:
         print(f"ошибка: {exc}", file=sys.stderr)
         return 2

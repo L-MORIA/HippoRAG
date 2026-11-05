@@ -259,6 +259,38 @@ python scripts/eval_grounding.py --run \
 `ASTRO_LLM_BASE_URL`. Сравнение путей и выводы — в
 [H2_6_GROUNDING_REPORT_2026-11-05.md](./H2_6_GROUNDING_REPORT_2026-11-05.md).
 
+#### Page-level режим 5 и page recall@5 (H1-6)
+
+С 2026-11-05 адаптер по умолчанию отдаёт **страницы**, а не чанки: чанки
+группируются по `(source_file, page_num)`, BM25 считается по полному тексту
+страницы, dense — максимум по её чанкам, каналы сливаются RRF, top-50
+переранжируется RU cross-encoder. Страница — единица выдачи, поэтому чанки
+одной страницы больше не занимают несколько слотов top-5.
+
+Замер H1-6 с жёстким порогом page recall@5 ≥ 80 %:
+
+```powershell
+$env:ASTRO_RETRIEVER_TOP_K = "5"
+$env:LLM_API_NAME = "google/gemma-4-e4b"
+python scripts/eval_grounding.py --run `
+  --retriever grounding_astro_retriever:retrieve `
+  --require-page-recall `
+  --out-json eval/grounding/report_h1_6.json `
+  --out-md eval/grounding/report_h1_6.md `
+  --out-predictions eval/grounding/predictions_h1_6.jsonl
+```
+
+`page recall@5` считается по `retrieved` и совпадает по определению с H2-6:
+вопрос засчитан, если хотя бы одна gold-страница попала в top-5. Дополнительно
+в отчёте есть `page coverage@5` (доля всех gold-страниц) и page recall@10/@50.
+Если в предсказаниях нет `retrieved`, метрика считается не измеренной, и
+`--require-page-recall` возвращает код 2.
+
+Вернуться к чанковому baseline H2-6: `ASTRO_RETRIEVER_PAGE_LEVEL=0`.
+Остальные настройки: `ASTRO_RETRIEVER_RERANK_POOL` (50),
+`ASTRO_RETRIEVER_PAGE_MAX_CHARS` (4000). Детали — в
+[H1_6_PAGE_RETRIEVAL_2026-11-05.md](./H1_6_PAGE_RETRIEVAL_2026-11-05.md).
+
 ## 8. Тесты
 
 ```bash

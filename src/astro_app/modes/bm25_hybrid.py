@@ -2,6 +2,7 @@
 
 import numpy as np
 
+from ..page_retrieval import search_pages_hybrid
 from ..primitives import _build_bm25, _get_chunk_meta
 from ..query import _expand_query, split_query_terms
 from ..rerankers import _rerank_with_crossencoder, _rerank_with_crossencoder_ru
@@ -73,6 +74,16 @@ def search_bm25_hybrid_ru(hipporag, query, top_k=10, candidate_pool=200):
     rest = scored[50:]
     reranked = _rerank_with_crossencoder_ru(query, top_50)
     return (reranked + rest)[:top_k]
+
+
+def search_bm25_hybrid_ru_pages(hipporag, query, top_k=5, **kwargs):
+    """Page-level вариант режима 5 для H1-6 и Q&A-заземления.
+
+    Возвращает ``PageHit`` (по одному на страницу), а не чанки: это поднимает
+    page recall@5, потому что несколько чанков одной страницы больше не
+    занимают несколько слотов выдачи.
+    """
+    return search_pages_hybrid(hipporag, query, top_k=top_k, **kwargs)
 
 
 def search_rrf_context(hipporag, query, top_k=10, candidate_pool=150, context_window=1):

@@ -49,12 +49,15 @@ def _prediction(
     abstained: bool = False,
     fragment_count: int | None = 1,
     errors=None,
+    retrieved=None,
 ):
     return eg.Prediction(
         id=qid,
         answer=answer,
         abstained=abstained,
         citations=citations or [],
+        retrieved=retrieved or [],
+        retrieved_provided=retrieved is not None,
         fragment_count=fragment_count,
         errors=errors or [],
     )
@@ -492,3 +495,151 @@ def test_cli_stub_legacy_fails_citation_thresholds(tmp_path):
     report = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
     assert report["metrics"]["citation_precision"] == 0.0
     assert report["metrics"]["answer_accuracy"] == 1.0
+
+
+def test_page_recall_at_5_counts_question_when_gold_page_retrieved():
+    golden = _golden(
+        _entry(
+            "q1",
+            sources=[{"doc_title": "A.pdf", "page_num": 1}],
+            terms=["альфа"],
+        )
+    )
+    predictions = {
+        "q1": _prediction(
+            "q1",
+            answer="Альфа [1].",
+            citations=[eg.SourceRef("A.pdf", 1)],
+            retrieved=[eg.SourceRef("A.pdf", 1), eg.SourceRef("B.pdf", 9)],
+        )
+    }
+
+    metrics = eg.evaluate(golden, predictions)["metrics"]
+
+    assert metrics["page_recall_at_5"] == 1.0
+    assert metrics["page_recall_measured"] is True
+
+
+def test_page_recall_at_5_is_zero_when_gold_page_missing():
+    golden = _golden(
+        _entry(
+            "q1",
+            sources=[{"doc_title": "A.pdf", "page_num": 1}],
+            terms=["альфа"],
+        )
+    )
+    predictions = {
+        "q1": _prediction(
+            "q1",
+            answer="Альфа [1].",
+            citations=[eg.SourceRef("A.pdf", 1)],
+            retrieved=[eg.SourceRef("B.pdf", 9)],
+        )
+    }
+
+    metrics = eg.evaluate(golden, predictions)["metrics"]
+
+    assert metrics["page_recall_at_5"] == 0.0
+    assert metrics["page_coverage_at_5"] == 0.0
+
+
+def test_page_recall_is_none_without_retrieved_block():
+    golden = _golden(
+        _entry(
+            "q1",
+            sources=[{"doc_title": "A.pdf", "page_num": 1}],
+            terms=["альфа"],
+        )
+    )
+    predictions = {"q1": _prediction("q1", answer="Альфа [1].", citations=[])}
+    result = eg.evaluate(golden, predictions)
+
+    assert result["metrics"]["page_recall_at_5"] is None
+    assert result["metrics"]["page_recall_measured"] is False
+    assert eg.check_retrieval_thresholds(result["metrics"]) == {}
+
+
+def test_page_recall_uses_any_gold_page_but_coverage_counts_all():
+    golden = _golden(
+        _entry(
+            "q1",
+            sources=[
+                {"doc_title": "A.pdf", "page_num": 1},
+                {"doc_title": "B.pdf", "page_num": 2},
+            ],
+            terms=["альфа"],
+            borderline=True,
+        )
+    )
+    predictions = {
+        "q1": _prediction(
+            "q1",
+            answer="Альфа [1].",
+            citations=[eg.SourceRef("A.pdf", 1)],
+            retrieved=[eg.SourceRef("A.pdf", 1)],
+        )
+    }
+
+    metrics = eg.evaluate(golden, predictions)["metrics"]
+
+    assert metrics["page_recall_at_5"] == 1.0
+    assert metrics["page_coverage_at_5"] == 0.5
+
+
+def test_page_recall_threshold_is_eighty_percent():
+    assert eg.check_retrieval_thresholds({"page_recall_at_5": 0.8})["page_recall_at_5"]["passed"]
+    assert not eg.check_retrieval_thresholds({"page_recall_at_5": 0.79})["page_recall_at_5"][
+        "passed"
+    ]
+
+
+def test_run_questions_marks_retrieved_provided():
+    golden = _golden(
+        _entry(
+            "q1",
+            sources=[{"doc_title": "A.pdf", "page_num": 1}],
+            terms=["альфа"],
+        )
+    )
+
+    predictions = eg.run_questions(golden, stub_mode="abstain")
+
+    assert predictions[0].retrieved_provided is True
+    assert eg.page_recall_at_k(predictions[0], golden.items[0], 5) == 1.0
+
+
+def test_require_page_recall_fails_when_metric_not_measured(tmp_path, capsys):
+    golden = eg.load_golden()
+    predictions_path = tmp_path / "predictions.jsonl"
+    predictions_path.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "id": question.id,
+                    "answer": eg.ABSTAIN_TEXT,
+                    "abstained": True,
+                    "citations": [],
+                    "fragment_count": 1,
+                },
+                ensure_ascii=False,
+            )
+            for question in golden.items
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    code = eg.main(
+        [
+            "--predictions",
+            str(predictions_path),
+            "--require-page-recall",
+            "--out-json",
+            str(tmp_path / "report.json"),
+            "--out-md",
+            str(tmp_path / "report.md"),
+        ]
+    )
+
+    assert code == 2
+    assert "page recall@5 не измерен" in capsys.readouterr().err
