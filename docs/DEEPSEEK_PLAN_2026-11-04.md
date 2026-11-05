@@ -20,7 +20,7 @@
 | D-6. `StandardRAG.qa` | готово | Тот же парсер и strict-контракт |
 | D-7. Общий helper | готово | `Fragment`, `answer_grounded`, единый промпт и отказ |
 | D-8. Режимы CLI | готово с отклонением | 12/19/21 переведены; `sign_zones` (9–11) осознанно не переведён: там извлечение, резюме и стилизация, а не ответ на вопрос |
-| D-9. Golden set | готово | 36 вопросов: 18 обычных answerable, 5 пограничных, 13 unanswerable |
+| D-9. Golden set | готово | 36 вопросов: 18 обычных answerable, 5 пограничных, 13 unanswerable. Разметка `a18`/`a07` проверена по тексту книг — верна, см. §5.1 [отчёта](./H2_6_GROUNDING_REPORT_2026-11-05.md) |
 | D-10. Eval-скрипт | готово | Метрики, stub-отчёт и два real-eval адаптера: `scripts/grounding_retriever.py` (`HippoRAG.rag_qa`) и `scripts/grounding_astro_retriever.py` (продуктовый режим 5). Реальные прогоны сняты 2026-11-05 |
 | D-11. Hardening | готово | Один repair-retry, защита от prompt injection, логи и p95 |
 | D-12. Документация | готово | Этот план, `HOW_TO_RUN.md`, `README_RU.md`, `CHANGELOG_RU.md` |
