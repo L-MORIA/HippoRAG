@@ -76,10 +76,12 @@ LLM-переформулировку. Сравнение «до/после» д�
 
 ## M1–M8: замеры 2026-11-05
 
-Источник: коммиты `e0c27b8` (M1/M3/M4/M8) и `44f449e` (M7). Сырые отчёты —
-`outputs/reports/eval_recall10.{json,md}`, `outputs/reports/page_ceiling.json`
-и `outputs/reports/grounding_eval.{json,md}`. Подробный разбор, условия и
-команды — в [docs/MEASUREMENT_REPORT_2026-11-05.md](../../docs/MEASUREMENT_REPORT_2026-11-05.md).
+Источник: коммиты `e0c27b8` (M1/M3/M4/M8), `44f449e` (M7) и `7dd77fd`
+(M5/M6). Сырые отчёты — `outputs/reports/eval_recall10.{json,md}`,
+`outputs/reports/page_ceiling.json`, `outputs/reports/grounding_eval.{json,md}`,
+`outputs/reports/m5_install_time.json` и `outputs/reports/ablation_synonymy.json`.
+Подробный разбор, условия и команды — в
+[docs/MEASUREMENT_REPORT_2026-11-05.md](../../docs/MEASUREMENT_REPORT_2026-11-05.md).
 
 | # | Метрика | Результат | Цель | Вердикт |
 |---|---|---|---|---|
@@ -88,8 +90,8 @@ LLM-переформулировку. Сравнение «до/после» д�
 | M2 | Доля ответов без цитаты | отдельно не измерена; M7: marker validity 1.000, uncited 0.0 % | 0 % | ⏳ нет точной метрики |
 | M3 | `citations[].sources` | оба PDF в цитате | все источники | ✅ PASS |
 | M4 | Покрытие `src/hipporag` | **40 %** (1928 / 4813) | ≥ 40 % | ✅ PASS, на границе |
-| M5 | Установка на чистую машину | не измерена | ≤ 15 мин | ⏳ |
-| M6 | Ablation графа (synonymy on/off) | не измерена | доказать пользу | ⏳ |
+| M5 | Установка на чистую машину | **11.1 мин** (667.7 с) | ≤ 15 мин | ✅ PASS |
+| M6 | Ablation графа (synonymy on/off) | `recall@5_doc` **3.3913** против **3.0870**, MRR@10 **0.516** против **0.4931** | доказать пользу | ✅ PASS |
 | M7 | Grounding, 8 метрик | **7/8 PASS**; citation precision **0.621** | precision ≥ 0.8 | ⚠️ один провал |
 | M7 | Page recall@5 (H1-6) | **87.0 %** | ≥ 80 % | ✅ PASS |
 | M8 | Page recall@5, 7 упрощённых ретриверов | **73.9 %** (лучший `rrf_ce`) | ≥ 80 % | ❌ для набора; полный путь — 87.0 % |
@@ -103,6 +105,33 @@ LLM-переформулировку. Сравнение «до/после» д�
 
 Режим 1 в прогон не включён: в отчёте `llm.available=false`, а режим 1
 использует LLM-переформулировку.
+
+### M5 — установка на чистую машину
+
+| Этап | Секунды |
+|---|---:|
+| Копирование репозитория | 45.0 |
+| Создание venv | 12.1 |
+| `pip install` | 567.9 |
+| `import main` | 42.6 |
+| **Итого** | **667.7** |
+
+**11.1 мин** при пороге ≤ 15 мин — PASS. Основное время — `pip install`
+(567.9 с, 85 %). Сырой отчёт: `outputs/reports/m5_install_time.json`.
+
+### M6 — ablation synonymy
+
+| Вариант | `recall@5_doc` | MRR@10 | synonymy-рёбер |
+|---|---:|---:|---:|
+| С synonymy | **3.3913** | **0.5160** | 726 250 |
+| Без synonymy | 3.0870 | 0.4931 | 0 |
+| Дельта | **+0.3043** | **+0.0229** | — |
+
+Режим 2, 40 вопросов. Относительный прирост `recall@5_doc` ≈ **+9.7 %**,
+MRR@10 — **+4.6 %**. Оба показателя лучше с synonymy, поэтому решение —
+**оставить synonymy** (H1-4 закрыт). В JSON поле называется `recall@5_doc`,
+но значение больше 1, поэтому это не доля; в проценты не пересчитывается.
+Сырой отчёт: `outputs/reports/ablation_synonymy.json`.
 
 ### M7 — grounding на golden set
 
@@ -162,6 +191,11 @@ $env:ASTRO_RETRIEVER_TOP_K = "5"
 python scripts/eval_grounding.py --run --retriever grounding_astro_retriever:retrieve `
     --out-json outputs/reports/grounding_eval.json `
     --out-md outputs/reports/grounding_eval.md
+
+# M5 и M6
+# Скрипты замера в репозиторий не попали; в outputs/reports лежат сырые JSON
+# с числами. Для M6 нужны два прогона режима 2: с synonymy и с
+# synonymy_edge_topk=0.
 
 # M8
 python scripts/measure_page_ceiling.py

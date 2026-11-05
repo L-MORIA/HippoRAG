@@ -77,7 +77,7 @@ outputs/astrology_test/
 
 ### 3.3. Бэкап
 
-Остановите сервер и скопируйте:
+**Вручную (без остановки не обойтись):**
 
 1. каталог индекса `SAVE_DIR`;
 2. `.env` (без публикации в репозиторий);
@@ -87,7 +87,43 @@ outputs/astrology_test/
 Индекс можно копировать как обычный каталог: это parquet-файлы, `graph.pickle`
 и манифест. Не копируйте `temp_uploads/` — это временные загрузки.
 
+**Через API (сервер можно не останавливать):**
+
+```bash
+curl -X POST http://127.0.0.1:8000/index/backup \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"label": "before-update"}'
+```
+
+`POST /index/backup` создаёт zip рядом с каталогом индекса — в
+`<SAVE_DIR>/backups/`, и возвращает имя, путь, число файлов и размер.
+`GET /index/backups` перечисляет копии, новые сверху. К каждой копии
+пишется sidecar `<имя>.zip.json` с метаданными. Во время другой операции
+с индексом бэкап вернёт `409`: нельзя копировать наполовину записанный
+parquet.
+
+> Бэкап включает `llm_cache/`, поэтому может занимать сотни мегабайт.
+> Автоматической ротации нет: старые копии удаляйте вручную.
+
 ### 3.4. Восстановление
+
+**Через API:**
+
+```bash
+curl -X POST http://127.0.0.1:8000/index/restore \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "index-20261105-193000-before-update.zip"}'
+```
+
+Сервер закрывает текущий `HippoRAG`, распаковывает копию во временный
+каталог, проверяет `graph.pickle` и `index_manifest.json`, подменяет каталог
+и пересоздаёт `HippoRAG`. Если проверка или перезагрузка падает, старый
+каталог возвращается на место. Ошибки: `404` — копия не найдена, `400` —
+плохой архив или имя, `409` — идёт другая операция.
+
+**Вручную:**
 
 1. Остановите сервер.
 2. Замените каталог индекса резервной копией.
@@ -97,16 +133,42 @@ outputs/astrology_test/
 
 ### 3.5. Переиндексация
 
-1. Остановите сервер.
-2. Сохраните бэкап текущего индекса.
-3. Запустите `index_pdfs.py` с тем же `--output_dir`.
-4. Проверьте статистику и версию.
-5. Запустите сервер и задайте контрольный вопрос.
+**Через API по путям:**
 
-> **Ограничение:** добавление, удаление и переиндексация **из UI/API** пока не
-> реализованы — это задача H2-2. Маршруты `/ingest` и `/upload-and-ingest`
-> существуют в API, но в интерфейсе не выведены; для штатного обновления
-> используйте `index_pdfs.py`.
+```bash
+curl -X POST http://127.0.0.1:8000/index/reindex \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"pdf_paths": ["data/pdfs/new.pdf"]}'
+```
+
+Сервер сначала делает бэкап `before-reindex`, затем удаляет старые чанки
+этих же файлов (по `source_file`) и индексирует PDF заново. Повторная
+загрузка того же файла не оставляет дубликатов. Если чанк общий для двух
+документов, удаляется только metadata-запись переиндексируемого источника,
+а сам чанк остаётся.
+
+**Через загрузку файла:** `POST /upload-and-ingest` сохраняет PDF в
+`temp_uploads/` и запускает ту же переиндексацию в фоне — с бэкапом и
+статусом. Это основной путь «загрузил PDF → индекс обновился».
+
+**Наблюдение:**
+
+```bash
+curl http://127.0.0.1:8000/index/status -H "X-API-Key: $API_KEY"
+curl http://127.0.0.1:8000/index/documents -H "X-API-Key: $API_KEY"
+```
+
+`/index/status` показывает `state` (`idle/running/error`), текущую операцию,
+время начала/окончания, ошибку, версию формата, счётчики чанков/фактов/
+документов и число бэкапов. `/index/documents` группирует чанки по
+`source_file` и отдаёт число страниц и чанков.
+
+**Вручную:** остановите сервер, сохраните бэкап, запустите `index_pdfs.py`
+с тем же `--output_dir`, проверьте статистику и версию, запустите сервер.
+
+> Панель администратора в Web UI пока не выведена: операции доступны через
+> API и Swagger (`/docs`). Это осознанное ограничение первой версии H2-2.
 
 ## 4. API-сервер
 
@@ -145,7 +207,14 @@ X-API-Key: ваш-секретный-ключ
 | `GET /health` | Статус, число чанков/фактов, `auth_failures` | `X-API-Key` |
 | `POST /search` | Поиск через `HippoRAG.rag_qa` | `X-API-Key` |
 | `POST /ingest` | Индексация PDF по путям | `X-API-Key` |
-| `POST /upload-and-ingest` | Загрузка PDF и индексация | `X-API-Key` |
+| `POST /upload-and-ingest` | Загрузка PDF и индексация с бэкапом | `X-API-Key` |
+| `GET /index/status` | Статус индекса и операции | `X-API-Key` |
+| `GET /index/documents` | Документы в индексе | `X-API-Key` |
+| `POST /index/backup` | Создать бэкап | `X-API-Key` |
+| `GET /index/backups` | Список бэкапов | `X-API-Key` |
+| `POST /index/restore` | Восстановить из бэкапа | `X-API-Key` |
+| `POST /index/delete` | Удалить документы по `source_file` | `X-API-Key` |
+| `POST /index/reindex` | Переиндексировать PDF по путям | `X-API-Key` |
 | `GET /docs` | Swagger UI | `X-API-Key` |
 | `GET /` , `GET /ui/*` | Статика Web UI | без ключа |
 | `POST /api/ask` | Вопрос из Web UI | `X-API-Key` |
@@ -184,8 +253,9 @@ UI-маршрутами. Отдельный процесс и отдельный
 - Логи пишутся в stdout с уровнем `INFO`.
 - `/search` логирует `abstained`, `grounding_errors`, число цитат, число
   фрагментов, latency и p95 по последним запросам.
-- `/health` возвращает `auth_required` и `auth_failures` — счётчик отказов
-  авторизации с запуска.
+- `/health` возвращает `auth_required`, `auth_failures`, `index_version`,
+  `index_state` (`ok/missing/stale/...`), `index_operation`
+  (`idle/running/error`) и число документов `documents`.
 - Структурных логов, per-stage timings и дашборда пока нет — это H2-4.
   Для базовой диагностики используйте `grep` по логам и `/health`.
 
@@ -203,11 +273,11 @@ UI-маршрутами. Отдельный процесс и отдельный
 
 | Задача | Статус |
 |---|---|
-| H2-2: add/delete/reindex из UI/API, backup/restore, статус индексации | ⏳ |
+| H2-2: add/delete/reindex, backup/restore, статус индексации | ✅ API и `/upload-and-ingest`; панель в Web UI — ⏳ |
 | H2-3: Docker, Windows-установщик, one-command start | ⏳ |
 | H2-4: структурные логи, метрики, дашборд | ⏳ |
 | H2-5: полный набор документации | ✅ этот документ и связанные гайды |
-| H2-6: перезамер grounding-метрик | ⏳ ждёт индекс и LM Studio |
+| H2-6: перезамер grounding-метрик | ✅ M7: 7/8 PASS; citation precision 0.621 ниже цели |
 
 ## 9. Быстрые команды
 
@@ -218,6 +288,12 @@ python scripts/show_index_stats.py --save_dir outputs/astrology_test
 
 # API
 uvicorn src.hipporag.search_api.server:app --host 127.0.0.1 --port 8000
+
+# индекс через API
+curl http://127.0.0.1:8000/index/status -H "X-API-Key: $API_KEY"
+curl -X POST http://127.0.0.1:8000/index/backup -H "X-API-Key: $API_KEY"
+curl -X POST http://127.0.0.1:8000/index/restore -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" -d '{"name": "index-....zip"}'
 
 # Web UI
 uvicorn astro_app.web:app --host 127.0.0.1 --port 8000
