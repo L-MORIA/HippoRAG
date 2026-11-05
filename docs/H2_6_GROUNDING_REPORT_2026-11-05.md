@@ -182,6 +182,11 @@ python scripts/eval_grounding.py --run --retriever grounding_astro_retriever:ret
 > **Статус на 2026-11-05:** п.1 выполнен — M7 дал page recall@5 **87,0 %**.
 > Answer rate и accuracy перезамерены: **100 %** и **73,9 %**. Остался
 > citation precision **0,621** — единственный непройденный порог.
+>
+> **Задание на следующий шаг:**
+> [TASK_H2_6_CITATION_PRECISION_2026-11-05.md](./TASK_H2_6_CITATION_PRECISION_2026-11-05.md)
+> — сохранить M7-baseline, офлайн проверить политики отбора цитат, затем
+> live-прогон; критерий — P ≥ 0,80 без падения recall.
 
 1. ~~**P1 (H1): поднять page recall@5 до ≥ 80 %.**~~ Выполнено в H1-6
    (M7: 87,0 %). Дальше — citation precision: модель добавляет лишние

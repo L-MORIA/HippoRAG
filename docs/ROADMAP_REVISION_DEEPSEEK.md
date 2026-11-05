@@ -2375,6 +2375,11 @@ baseline зафиксирован; для LLM-режимов есть отдел
 > H1-6 выполнена (M7: 87,0 %); следующий шаг — поднять citation precision и
 > подключить page-level путь к Web UI.
 >
+> **Задание на citation precision:**
+> [TASK_H2_6_CITATION_PRECISION_2026-11-05.md](./TASK_H2_6_CITATION_PRECISION_2026-11-05.md)
+> — M7-baseline, офлайн-политики отбора цитат, live-прогон; цель P ≥ 0,80
+> без падения recall.
+>
 > **Отдельный замер M2 для legacy-режимов 12/19/21 (2026-11-05, выполнен).**
 > Прогон по заданию
 > [TASK_M2_LEGACY_MODES_2026-11-05.md](./TASK_M2_LEGACY_MODES_2026-11-05.md):
