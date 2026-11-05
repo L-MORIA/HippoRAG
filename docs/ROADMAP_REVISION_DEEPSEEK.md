@@ -1107,19 +1107,26 @@ editable-режим после смены имени.
 | `README_RU.md:58` | 10 559 предложений | совпадает |
 | `README.md:51` | индекс в `outputs/astrology/...` | `outputs/astrology_test/...` |
 | `docs/INDEXING_GUIDE.md` | 1 422 / 6 979 / 8 401 | 1 369 / 6 528 / 7 897 |
-| `docs/QUICKSTART_RU.md` | ссылка на `HOW_TO_RUN.md` | файла нет |
-| `docs/QUICKSTART.md` | ссылка на `HOW_TO_RUN.md` | файла нет |
-| `docs/USER_GUIDE.md` | ссылка на `HOW_TO_RUN.md` | файла нет |
-| `docs/CONTRIBUTING.md:6` | «Full documentation: QUICKSTART_RU…» | все три — заглушки 285–366 байт |
+| `docs/QUICKSTART_RU.md` | ссылка на `HOW_TO_RUN.md` | реальный quickstart (2026-11-05) |
+| `docs/QUICKSTART.md` | ссылка на `HOW_TO_RUN.md` | реальный quickstart (2026-11-05) |
+| `docs/USER_GUIDE.md` | ссылка на `HOW_TO_RUN.md` | полное руководство (2026-11-05) |
+| `docs/CONTRIBUTING.md:6` | «Full documentation: QUICKSTART_RU…» | ссылки на реальные гайды (2026-11-05) |
 | `README.md` | описание upstream HippoRAG 2 | не описывает продукт |
 | `docs/COMPLETION_REPORT_2026-11-02.md` | «CI-ворота зелёные» | CI красный; после `538e59f` — ещё и billing-блокер |
 | `docs/MAIN_SPLIT_PLAN.md` | «`__all__` = 89 имён» | runtime — 2 имени |
 
+> **Статус на 2026-11-05:** `docs/QUICKSTART.md`, `docs/QUICKSTART_RU.md`,
+> `docs/USER_GUIDE.md` заменены реальными руководствами, ссылки в
+> `docs/CONTRIBUTING.md` обновлены. Остальные расхождения из таблицы
+> (`README_RU.md`, `INDEXING_GUIDE.md`, `README.md`) остаются открытыми.
+
 Дополнительно:
 
-- `docs/QUICKSTART.md`, `docs/QUICKSTART_RU.md`, `docs/USER_GUIDE.md` — это
+- ~~`docs/QUICKSTART.md`, `docs/QUICKSTART_RU.md`, `docs/USER_GUIDE.md` — это
   **заглушки** размером 285–366 байт, которые просто отправляют в несуществующий
-  `HOW_TO_RUN.md`. Новый пользователь не может начать работу.
+  `HOW_TO_RUN.md`.~~ **Исправлено 2026-11-05:** заменены реальными
+  руководствами; новый пользователь начинает с [USER_GUIDE.md](./USER_GUIDE.md)
+  или [QUICKSTART_RU.md](./QUICKSTART_RU.md).
 - В корне лежат `HIPPORAG_AUDIT_2026-11-01.md` (42 227 байт) и
   `HIPPORAG_AUDIT_FRESH_2026-11-01.md` (9 199 байт) — дубликаты/черновики
   аудитов, засоряющие корень.
@@ -2283,6 +2290,14 @@ baseline зафиксирован; для LLM-режимов есть отдел
 - FAQ.
 - Заменить заглушки `QUICKSTART*`, `USER_GUIDE`.
 
+> **Статус на 2026-11-05.** Созданы `docs/USER_GUIDE.md`,
+> `docs/ADMIN_GUIDE.md`, `docs/ARCHITECTURE.md`, `docs/TROUBLESHOOTING.md`,
+> `docs/FAQ.md`; заглушки `docs/QUICKSTART.md`, `docs/QUICKSTART_RU.md`,
+> `docs/USER_GUIDE.md` заменены реальными руководствами. Ссылки в
+> `docs/CONTRIBUTING.md` и `README_RU.md` обновлены. Приёмка «новый
+> пользователь проходит сценарий по документации» ещё не проведена: нужны
+> индекс и LM Studio.
+
 **Приёмка:** новый пользователь проходит сценарий по документации.
 
 #### Задача H2-6. Доверие к ответу (принято из плана Mavis, уровень 2)
@@ -3120,8 +3135,8 @@ success); тег `v2.0.0-alpha.4` поставлен после зелёного
 | URL на OSU | `pyproject.toml:91-95` | чтение | ❌ открыто |
 | Нет `[project.scripts]` | `pyproject.toml` | grep | ❌ открыто |
 | `README.md` — upstream | `README.md:1-10` | чтение | ❌ открыто |
-| `HOW_TO_RUN.md` отсутствует | `docs/` | `Test-Path` → False | ❌ открыто |
-| `QUICKSTART*` — заглушки | `docs/QUICKSTART*.md` | размер 285–366 байт | ❌ открыто |
+| `HOW_TO_RUN.md` отсутствует | `docs/` | `Test-Path` → True | ✅ исправлено |
+| `QUICKSTART*` — заглушки | `docs/QUICKSTART*.md` | реальные руководства | ✅ исправлено 2026-11-05 |
 | Числа в docs устарели | `README_RU.md:57-64`, `INDEXING_GUIDE.md` | сравнение с индексом | ❌ открыто |
 | 726 250 synonymy-рёбер | `ROADMAP.md` / индекс | документ проекта | ✅ актуально |
 | 23 режима | `src/astro_app/modes/__init__.py` | 23 `ModeSpec` | ✅ актуально |
@@ -3199,10 +3214,10 @@ success); тег `v2.0.0-alpha.4` поставлен после зелёного
 | 4 | `README_RU.md:59` | 8 401 узел, 62 978 рёбер | 7 897 / 736 089 | высокая |
 | 5 | `README.md:51` | `outputs/astrology` | `outputs/astrology_test` | средняя |
 | 6 | `INDEXING_GUIDE.md` | 1 422 / 6 979 / 8 401 | 1 369 / 6 528 / 7 897 | средняя |
-| 7 | `QUICKSTART_RU.md` | ссылка на `HOW_TO_RUN.md` | файла нет | высокая |
-| 8 | `QUICKSTART.md` | ссылка на `HOW_TO_RUN.md` | файла нет | высокая |
-| 9 | `USER_GUIDE.md` | ссылка на `HOW_TO_RUN.md` | файла нет | высокая |
-| 10 | `CONTRIBUTING.md:6` | «Full documentation» | заглушки 285–366 байт | средняя |
+| 7 | `QUICKSTART_RU.md` | ссылка на `HOW_TO_RUN.md` | реальный quickstart | ✅ исправлено 2026-11-05 |
+| 8 | `QUICKSTART.md` | ссылка на `HOW_TO_RUN.md` | реальный quickstart | ✅ исправлено 2026-11-05 |
+| 9 | `USER_GUIDE.md` | ссылка на `HOW_TO_RUN.md` | полное руководство | ✅ исправлено 2026-11-05 |
+| 10 | `CONTRIBUTING.md:6` | «Full documentation» | ссылки на реальные гайды | ✅ исправлено 2026-11-05 |
 | 11 | `COMPLETION_REPORT` | «CI-ворота зелёные» | CI красный; после `538e59f` — ещё и billing-блокер | критическая |
 | 12 | `MAIN_SPLIT_PLAN` | «`__all__` = 89 имён» | runtime — 2 имени | средняя |
 | 13 | `README.md` | HippoRAG 2 от OSU | не описывает продукт | высокая |

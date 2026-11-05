@@ -4,6 +4,12 @@
 индексации — в [INDEXING_GUIDE.md](./INDEXING_GUIDE.md). План развития проекта —
 в [ROADMAP_REVISION_DEEPSEEK.md](./ROADMAP_REVISION_DEEPSEEK.md).
 
+Документация: [USER_GUIDE.md](./USER_GUIDE.md) (пользователь),
+[ADMIN_GUIDE.md](./ADMIN_GUIDE.md) (эксплуатация),
+[ARCHITECTURE.md](./ARCHITECTURE.md) (устройство),
+[TROUBLESHOOTING.md](./TROUBLESHOOTING.md) (ошибки),
+[FAQ.md](./FAQ.md) (частые вопросы).
+
 ## 1. Что нужно
 
 - **Python 3.10–3.12** (проект проверяется на 3.10, 3.11, 3.12; 3.13+ не
