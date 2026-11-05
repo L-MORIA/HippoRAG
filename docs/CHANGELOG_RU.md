@@ -1,5 +1,29 @@
 # История изменений HippoRAG
 
+## 2026-11-05 — M2: замер legacy-режимов 12/19/21 выполнен
+
+### Измерено
+- Citation coverage (M2) на golden set (36 вопросов), один прогон на режим:
+  **0 ответов без цитаты у всех трёх legacy-режимов** — 12 Self-RAG
+  (19 ответов), 19 GraphRAG (20), 21 DAT+LLM (22); marker validity 1.000
+  у всех. Оговорка «legacy отдельно не гонялись» снята.
+- Вторичные метрики: citation precision 0.177 / 0.122 / 0.468; accuracy
+  34.8 / 47.8 / 65.2 %; p50 12.6 / 19.9 / 24.7 с. Сильнейший из трёх —
+  режим 21; все уступают продуктовому пути (M7: precision 0.621).
+
+### Артефакты
+- `eval/grounding/predictions_mode{12,19,21}.jsonl` — по 36 предсказаний
+  (id совпадают с golden set).
+- `outputs/reports/m2_mode{12,19,21}.json|.md`, `*_raw.jsonl`,
+  `m2_legacy_summary.md` — отчёты `eval_grounding.py` и сводная таблица.
+- Адаптер `scripts/m2_legacy_modes.py` и сводка `scripts/m2_legacy_summary.py`.
+
+### Условия
+- Индекс `outputs/astrology_test` (gemma-4-e4b + mpnet-base-v2, 1369 чанков,
+  3 PDF, манифест `ok`), `qa_top_k=5`, температура 0.15, LM Studio
+  `google/gemma-4-e4b`, Python 3.14.3 (в задании ожидался 3.11.9).
+  Полный отчёт — §10.1 `MEASUREMENT_REPORT_2026-11-05.md`.
+
 ## 2026-11-05 — M2: задание на замер legacy-режимов 12/19/21
 
 ### Добавлено
