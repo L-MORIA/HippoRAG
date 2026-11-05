@@ -47,6 +47,16 @@ class BaseEmbeddingStore(ABC):
     @abstractmethod
     def delete(self, hash_ids) -> None: ...
 
+    def remove_metadata_entries(self, hash_id: str, source_files: Set[str]) -> bool:
+        """Удалить metadata-записи об указанных источниках.
+
+        Нужно для H2-2: чанк, общий для двух PDF, нельзя удалять целиком,
+        но при удалении одного документа его metadata-запись должна исчезнуть.
+        Возвращает ``True``, если запись изменилась. Базовая реализация — no-op
+        для бэкендов, которые ещё не поддерживают операцию.
+        """
+        return False
+
     @abstractmethod
     def get_row(self, hash_id: str) -> Dict: ...
 
@@ -308,6 +318,40 @@ class EmbeddingStore(BaseEmbeddingStore):
 
     def get_row(self, hash_id):
         return self.hash_id_to_row[hash_id]
+
+    def remove_metadata_entries(self, hash_id: str, source_files: Set[str]) -> bool:
+        """Удалить metadata-записи об указанных ``source_file`` из чанка (H2-2).
+
+        Сам чанк остаётся: он может принадлежать другому документу. Если
+        после удаления записей не осталось, вызывающий код должен удалить
+        чанк обычным ``delete``.
+        """
+        targets = {
+            os.path.basename(str(source).replace("\\", "/"))
+            for source in source_files
+            if str(source).strip()
+        }
+        if not targets:
+            return False
+        with self._lock:
+            index = self.hash_id_to_idx.get(hash_id)
+            if index is None:
+                return False
+            entries = self.metadatas[index]
+            kept = [
+                entry
+                for entry in entries
+                if os.path.basename(str(entry.get("source_file") or "").replace("\\", "/"))
+                not in targets
+            ]
+            if len(kept) == len(entries):
+                return False
+            self.metadatas[index] = kept
+            row = self.hash_id_to_row.get(hash_id)
+            if row is not None:
+                row["metadata"] = kept
+            self._save_data()
+            return True
 
     def get_metadata(self, hash_id):
         """Get the primary (first known) metadata for a specific hash_id."""

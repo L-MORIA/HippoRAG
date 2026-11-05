@@ -11,13 +11,26 @@ from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, Uplo
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from astro_app.index_lifecycle import IndexLifecycle
+
 from ..HippoRAG import HippoRAG
 from ..utils.config_utils import BaseConfig
 from .models import (
+    BackupInfo,
+    BackupListResponse,
+    BackupRequest,
+    DeleteDocumentsRequest,
+    DeleteDocumentsResponse,
     HealthResponse,
+    IndexDocumentsResponse,
+    IndexStatusResponse,
     IngestRequest,
     IngestResponse,
     IngestStats,
+    ReindexRequest,
+    ReindexResponse,
+    RestoreRequest,
+    RestoreResponse,
     SearchRequest,
     SearchResponse,
     SearchResult,
@@ -29,6 +42,8 @@ logger = logging.getLogger(__name__)
 
 # Глобальные переменные
 hipporag: Optional[HippoRAG] = None
+index_lifecycle: Optional[IndexLifecycle] = None
+_app_config: Optional[BaseConfig] = None
 start_time: float = time.time()
 
 # D-11: последние задержки /search для p95 в логах. Храним только числа,
@@ -69,10 +84,37 @@ ALLOWED_ORIGINS = [
 auth_failures = 0
 
 
+def _close_hipporag() -> None:
+    """Закрыть ресурсы текущего индекса перед подменой каталога (H2-2)."""
+    if hipporag is None:
+        return
+    for attribute in (
+        "chunk_embedding_store",
+        "entity_embedding_store",
+        "fact_embedding_store",
+    ):
+        store = getattr(hipporag, attribute, None)
+        close = getattr(store, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception as error:  # noqa: BLE001 — закрытие не должно мешать restore
+                logger.warning("Не удалось закрыть %s: %s", attribute, error)
+
+
+def _reload_hipporag() -> HippoRAG:
+    """Пересоздать HippoRAG после восстановления индекса (H2-2)."""
+    global hipporag
+    if _app_config is None:
+        raise RuntimeError("Конфигурация сервера не сохранена — reload невозможен")
+    hipporag = HippoRAG(global_config=_app_config)
+    return hipporag
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Инициализация при запуске сервера: конфиг из env, проверка непустоты индекса."""
-    global hipporag
+    global hipporag, index_lifecycle, _app_config
     if API_KEY_REQUIRED and not API_KEY:
         raise RuntimeError(
             "API_KEY обязателен (API_KEY_REQUIRED=1 по умолчанию), но не задан. "
@@ -89,8 +131,15 @@ async def lifespan(app: FastAPI):
             "EMBEDDING_MODEL_NAME",
             "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
         )
+        _app_config = config
 
         hipporag = HippoRAG(global_config=config)
+        index_lifecycle = IndexLifecycle(
+            index_dir=hipporag.working_dir,
+            get_hipporag=lambda: hipporag,
+            close_hipporag=_close_hipporag,
+            reload_hipporag=_reload_hipporag,
+        )
         chunk_count = len(hipporag.chunk_embedding_store.get_all_ids())
         fact_count = len(hipporag.fact_embedding_store.get_all_ids())
         if chunk_count == 0:
@@ -195,6 +244,8 @@ async def health_check():
 
     chunk_count = len(hipporag.chunk_embedding_store.get_all_ids()) if hipporag else 0
     fact_count = len(hipporag.fact_embedding_store.get_all_ids()) if hipporag else 0
+    index_info = index_lifecycle.status() if index_lifecycle is not None else {}
+    index_meta = index_info.get("index") or {}
 
     return HealthResponse(
         status="healthy",
@@ -204,7 +255,114 @@ async def health_check():
         facts=fact_count,
         auth_required=API_KEY_REQUIRED,
         auth_failures=auth_failures,
+        index_version=index_meta.get("format_version"),
+        index_state=index_meta.get("format_state", "unknown"),
+        index_operation=index_info.get("state", "idle"),
+        documents=index_meta.get("documents", 0),
     )
+
+
+def _require_index_lifecycle() -> IndexLifecycle:
+    """Вернуть менеджер индекса или 503, если сервер ещё не инициализирован."""
+    if index_lifecycle is None:
+        raise HTTPException(status_code=503, detail="Индекс не инициализирован")
+    return index_lifecycle
+
+
+@app.get("/index/status", response_model=IndexStatusResponse, tags=["index"])
+async def index_status() -> IndexStatusResponse:
+    """Статус индекса: версия, счётчики, документы и текущая операция (H2-2)."""
+    return IndexStatusResponse(**_require_index_lifecycle().status())
+
+
+@app.get("/index/documents", response_model=IndexDocumentsResponse, tags=["index"])
+async def index_documents() -> IndexDocumentsResponse:
+    """Список документов, попавших в индекс (H2-2)."""
+    lifecycle = _require_index_lifecycle()
+    try:
+        documents = lifecycle.documents()
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    return IndexDocumentsResponse(documents=documents, total=len(documents))
+
+
+@app.post("/index/backup", response_model=BackupInfo, tags=["index"])
+async def index_backup(request: Optional[BackupRequest] = None) -> BackupInfo:
+    """Создать резервную копию индекса (H2-2)."""
+    lifecycle = _require_index_lifecycle()
+    try:
+        record = lifecycle.backup(request.label if request else None)
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except (FileNotFoundError, ValueError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return BackupInfo(**record)
+
+
+@app.get("/index/backups", response_model=BackupListResponse, tags=["index"])
+async def index_backups() -> BackupListResponse:
+    """Список резервных копий, новые сверху (H2-2)."""
+    return BackupListResponse(backups=_require_index_lifecycle().list_backups())
+
+
+@app.post("/index/restore", response_model=RestoreResponse, tags=["index"])
+async def index_restore(request: RestoreRequest) -> RestoreResponse:
+    """Восстановить индекс из резервной копии (H2-2)."""
+    lifecycle = _require_index_lifecycle()
+    try:
+        result = lifecycle.restore(request.name)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return RestoreResponse(**result)
+
+
+@app.post("/index/delete", response_model=DeleteDocumentsResponse, tags=["index"])
+async def index_delete(request: DeleteDocumentsRequest) -> DeleteDocumentsResponse:
+    """Удалить документы из индекса по ``source_file`` (H2-2)."""
+    lifecycle = _require_index_lifecycle()
+    try:
+        result = lifecycle.delete_documents(request.source_files)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except Exception as error:  # noqa: BLE001 — наружу отдаём понятный 500
+        logger.exception("Ошибка удаления документов")
+        raise HTTPException(status_code=500, detail="Не удалось удалить документы") from error
+    return DeleteDocumentsResponse(**result)
+
+
+@app.post("/index/reindex", response_model=ReindexResponse, tags=["index"])
+async def index_reindex(
+    request: ReindexRequest, background_tasks: BackgroundTasks = None
+) -> ReindexResponse:
+    """Переиндексировать PDF в фоне, предварительно сделав бэкап (H2-2)."""
+    lifecycle = _require_index_lifecycle()
+    if lifecycle.status().get("state") == "running":
+        raise HTTPException(status_code=409, detail="Операция с индексом уже выполняется")
+
+    missing = [path for path in request.pdf_paths if not os.path.exists(path)]
+    if missing:
+        raise HTTPException(status_code=400, detail="Файлы не найдены: " + ", ".join(missing))
+
+    detail = {"pdf_paths": request.pdf_paths}
+    if background_tasks is not None:
+        background_tasks.add_task(lifecycle.reindex, request.pdf_paths)
+        message = "Переиндексация запущена в фоновом режиме"
+    else:
+        try:
+            detail = lifecycle.reindex(request.pdf_paths)
+        except (FileNotFoundError, ValueError) as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        except RuntimeError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        message = "Переиндексация завершена"
+
+    return ReindexResponse(status="accepted", message=message, detail=detail)
 
 
 @app.post("/search", response_model=SearchResponse)
@@ -315,6 +473,9 @@ async def ingest_documents(request: IngestRequest):
             chunks_before = len(hipporag.chunk_embedding_store.get_all_ids())
             hipporag.index_pdfs(valid_files, ocr_config=ocr_config)
             chunks_extracted = len(hipporag.chunk_embedding_store.get_all_ids()) - chunks_before
+            writer = getattr(hipporag, "_write_index_manifest", None)
+            if callable(writer):
+                writer()
         else:
             chunks_extracted = 0
 
@@ -376,10 +537,13 @@ async def upload_and_ingest(
     if not saved_files and files:
         raise HTTPException(status_code=400, detail="Не удалось сохранить ни один файл")
 
-    # Индексация в фоне
+    # Индексация в фоне. Через lifecycle — с бэкапом и статусом (H2-2).
     def index_task():
         try:
-            hipporag.index_pdfs(saved_files)
+            if index_lifecycle is not None:
+                index_lifecycle.reindex(saved_files)
+            else:
+                hipporag.index_pdfs(saved_files)
             # Очистка временных файлов после индексации
             for file_path in saved_files:
                 try:

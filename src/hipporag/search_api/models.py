@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -89,9 +89,95 @@ class HealthResponse(BaseModel):
     auth_failures: int = Field(
         default=0, description="Счётчик отказов авторизации с момента запуска"
     )
+    index_version: Optional[int] = Field(
+        default=None, description="Версия формата индекса из index_manifest.json"
+    )
+    index_state: str = Field(
+        default="unknown", description="Состояние формата индекса (ok/missing/stale/...)"
+    )
+    index_operation: str = Field(
+        default="idle", description="Текущая операция с индексом (idle/running/error)"
+    )
+    documents: int = Field(default=0, description="Количество документов в индексе")
     timestamp: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc), description="Текущее время"
     )
+
+
+# ── H2-2: жизненный цикл индекса ────────────────────────────────────────────
+
+
+class IndexStatusResponse(BaseModel):
+    state: str = Field(..., description="Состояние операции: idle/running/error")
+    operation: Optional[str] = Field(None, description="Имя операции")
+    started_at: Optional[str] = Field(None, description="Начало операции")
+    finished_at: Optional[str] = Field(None, description="Конец операции")
+    error: Optional[str] = Field(None, description="Ошибка последней операции")
+    detail: Dict[str, Any] = Field(default_factory=dict, description="Детали операции")
+    index: Dict[str, Any] = Field(default_factory=dict, description="Сведения об индексе")
+    backups: int = Field(default=0, description="Количество резервных копий")
+
+
+class IndexDocument(BaseModel):
+    source_file: str = Field(..., description="Имя файла источника")
+    doc_title: str = Field(default="", description="Название документа")
+    pages: int = Field(default=0, description="Количество страниц")
+    chunks: int = Field(default=0, description="Количество чанков")
+
+
+class IndexDocumentsResponse(BaseModel):
+    documents: List[IndexDocument] = Field(default_factory=list)
+    total: int = Field(default=0, description="Всего документов")
+
+
+class BackupRequest(BaseModel):
+    label: Optional[str] = Field(None, description="Метка резервной копии")
+
+
+class BackupInfo(BaseModel):
+    name: str = Field(..., description="Имя zip-файла")
+    path: str = Field(..., description="Полный путь")
+    created_at: str = Field(..., description="Время создания")
+    files: int = Field(default=0, description="Количество файлов")
+    bytes: int = Field(default=0, description="Размер в байтах")
+    label: str = Field(default="", description="Метка")
+    source_dir: str = Field(default="", description="Каталог индекса")
+
+
+class BackupListResponse(BaseModel):
+    backups: List[BackupInfo] = Field(default_factory=list)
+
+
+class RestoreRequest(BaseModel):
+    name: str = Field(..., description="Имя резервной копии (basename .zip)")
+
+
+class RestoreResponse(BaseModel):
+    restored: str = Field(..., description="Имя восстановленной копии")
+    working_dir: str = Field(..., description="Каталог индекса")
+    format_state: str = Field(..., description="Состояние формата после восстановления")
+
+
+class DeleteDocumentsRequest(BaseModel):
+    source_files: List[str] = Field(..., description="Имена документов (source_file)")
+
+
+class DeleteDocumentsResponse(BaseModel):
+    deleted_documents: List[str] = Field(default_factory=list)
+    missing_documents: List[str] = Field(default_factory=list)
+    deleted_chunks: int = Field(default=0)
+    shared_chunks_updated: int = Field(default=0)
+    skipped_shared_chunks: int = Field(default=0)
+
+
+class ReindexRequest(BaseModel):
+    pdf_paths: List[str] = Field(..., description="Пути к PDF для переиндексации")
+
+
+class ReindexResponse(BaseModel):
+    status: str = Field(default="accepted", description="Статус запуска")
+    message: str = Field(..., description="Пояснение")
+    detail: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ErrorResponse(BaseModel):
