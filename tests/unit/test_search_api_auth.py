@@ -40,13 +40,13 @@ def server_module():
     importlib.reload(srv)
 
 
-def _run_guard(srv, headers, method="GET"):
+def _run_guard(srv, headers, method="GET", path="/probe"):
     """Синхронная обёртка над async api_key_guard."""
     request = MagicMock()
     request.method = method
     request.headers = headers
     request.url = MagicMock()
-    request.url.path = "/probe"
+    request.url.path = path
     call_next = AsyncMock(return_value="PASS_THROUGH")
     return asyncio.run(srv.api_key_guard(request, call_next))
 
@@ -80,6 +80,19 @@ def test_preflight_options_bypasses_key(server_module):
     """D2: OPTIONS preflight проходит без ключа."""
     r = _run_guard(server_module, {"Origin": ALLOWED_ORIGINS[0]}, method="OPTIONS")
     assert r == "PASS_THROUGH"
+
+
+def test_ui_static_is_public_but_data_api_is_not(server_module):
+    """H2-1: HTML/CSS/JS открываются до ввода ключа, /api/* — нет."""
+    assert _run_guard(server_module, {}, path="/") == "PASS_THROUGH"
+    assert _run_guard(server_module, {}, path="/ui") == "PASS_THROUGH"
+    assert _run_guard(server_module, {}, path="/ui/") == "PASS_THROUGH"
+    assert _run_guard(server_module, {}, path="/ui/config") == "PASS_THROUGH"
+    assert _run_guard(server_module, {}, path="/ui/app.js") == "PASS_THROUGH"
+
+    for protected in ("/api/ask", "/api/feedback", "/search", "/health"):
+        response = _run_guard(server_module, {}, path=protected)
+        assert response.status_code == 401, protected
 
 
 def test_non_ascii_api_key_does_not_crash(server_module):

@@ -1,5 +1,37 @@
 # История изменений HippoRAG
 
+## 2026-11-05 — H2-1: веб-интерфейс
+
+### Добавлено
+- `src/astro_app/web/` — FastAPI-слой и статика поверх существующего
+  приложения: `service.py` (три режима и заземлённый ответ), `server.py`
+  (`/ui/config`, `/ui/modes`, `/api/ask`, `/api/feedback`, `/`), `models.py`,
+  `feedback.py` и `static/` (HTML/CSS/JS).
+- Три продуктовых режима: **5 «Быстрый»** (по умолчанию), **2 «Граф»** и
+  **1 «Максимальный охват»**. Ответ содержит только использованные цитаты,
+  найденные фрагменты и явный отказ, если ответа нет в источниках.
+- Обратная связь «полезно / бесполезно» с комментарием: append-only JSONL
+  `outputs/feedback/feedback.jsonl`, путь переопределяется `FEEDBACK_PATH`.
+  Персональные данные не сохраняются.
+- История запросов в `localStorage` (до 50 записей), экспорт текущего ответа
+  и истории в Markdown/JSON, копирование ответа.
+- `tests/unit/test_web_ui.py` — 14 тестов сервиса, маршрутов, обратной связи
+  и статики.
+
+### Изменено
+- `src/hipporag/search_api/server.py`: guard пропускает публичную статику
+  `/` и `/ui/*`, а `/api/ask`, `/api/feedback`, `/search` и `/health`
+  остаются под `X-API-Key`.
+- `pyproject.toml`: `astro_app.web/static/*` включены в package-data.
+
+### Тесты
+- `pytest tests/unit -m unit -q`: **435 passed, 1 skipped**.
+
+### Ожидает приёмки
+Сценарий с 5 внешними пользователями не проведён: нужны индекс
+`outputs/astrology_test` и запущенный LM Studio. Детали —
+в `docs/H2_1_WEB_UI_2026-11-05.md`.
+
 ## 2026-11-05 — H1-6: page-level retrieval
 
 ### Добавлено

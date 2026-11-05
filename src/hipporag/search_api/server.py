@@ -121,6 +121,16 @@ app = FastAPI(
 )
 
 
+def is_public_ui_path(path: str) -> bool:
+    """Публичная статика UI: HTML/CSS/JS без данных корпуса.
+
+    Страница должна открываться в браузере до ввода API-ключа, иначе
+    пользователь не увидит даже поле для ключа. Все маршруты с данными
+    (``/api/ask``, ``/api/feedback``, ``/search``) остаются под guard.
+    """
+    return path == "/" or path == "/ui" or path.startswith("/ui/")
+
+
 @app.middleware("http")
 async def api_key_guard(request: Request, call_next):
     """Аутентификация по заголовку X-API-Key.
@@ -133,7 +143,7 @@ async def api_key_guard(request: Request, call_next):
     ключ в preflight-запросе (D2). Отказы считаются и логируются (D5).
     """
     global auth_failures
-    if request.method != "OPTIONS":
+    if request.method != "OPTIONS" and not is_public_ui_path(request.url.path):
         if not API_KEY:
             if API_KEY_REQUIRED:
                 return JSONResponse(
