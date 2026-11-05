@@ -181,6 +181,17 @@ MRR@10 — **+4.6 %**. Оба показателя лучше с synonymy, по�
 Единственный провал — citation precision: модель добавляет лишние цитаты,
 хотя нужные источники находит (citation recall 0.848).
 
+**Попытка поднять precision (задание H2-6, 2026-11-05 вечер) — отрицательный
+результат.** Baseline M7 переснят (36 предсказаний: P 0.578, R 0.848,
+page recall 87.0 %). Офлайн-политики отбора цитат: лучший `hybrid` P 0.652
+(uncited 16.7 % > 10 %, потеряно 5 gold-цитат) — ни одна не проходит.
+Prompt-only «одна лучшая ссылка на утверждение»: P **0.714**, но R **0.783**
+(< 0.80) — модель схлопнула `a13` до единственной не-gold цитаты. Промпт
+откачен, код/gold/пороги не менялись. Артефакты:
+`eval/grounding/predictions_m7_baseline.jsonl`,
+`eval/grounding/m7_citation_policies.md` (таблицы политик + prompt-only +
+per-question аудит), `eval/grounding/predictions_m7_prompt_one.jsonl`.
+
 ### M8 — ablation page-ретриверов
 
 | Ретривер | R@5 | R@10 | R@20 | R@50 | MRR@10 |
