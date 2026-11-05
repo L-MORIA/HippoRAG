@@ -12,7 +12,12 @@
     python scripts/grounding_retriever.py \
         --save-dir outputs/astrology_test \
         --llm-name gemma-4-e4b \
+        --llm-api-name google/gemma-4-e4b \
         --llm-base-url http://localhost:1234/v1
+
+``--llm-name`` — имя каталога индекса (``config.llm_name``), ``--llm-api-name`` —
+id модели в API. У LM Studio они различаются: индекс собран под ``gemma-4-e4b``,
+а сервер принимает только ``google/gemma-4-e4b`` (иначе 400).
 
 Сравнение ``qa_top_k``::
 
@@ -34,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -182,6 +188,7 @@ def load_engine(args: argparse.Namespace) -> Any:
         llm_name=args.llm_name,
         save_dir=args.save_dir,
         llm_base_url=args.llm_base_url,
+        llm_api_name=args.llm_api_name,
         embedding_model_name=args.embedding_model,
         qa_top_k=args.qa_top_k,
         qa_strict_grounding=False if args.no_strict else None,
@@ -201,6 +208,11 @@ def engine_run_config(engine: Any, args: argparse.Namespace, qa_top_k: int) -> D
         "engine": "HippoRAG.rag_qa",
         "save_dir": _json_value(getattr(config, "save_dir", args.save_dir)),
         "llm_name": _json_value(getattr(config, "llm_name", args.llm_name)),
+        "llm_api_name": _json_value(
+            getattr(config, "llm_api_name", None)
+            or os.environ.get("LLM_NAME")
+            or getattr(config, "llm_name", args.llm_name)
+        ),
         "llm_base_url": _json_value(getattr(config, "llm_base_url", args.llm_base_url)),
         "embedding_model_name": _json_value(
             getattr(config, "embedding_model_name", args.embedding_model)
@@ -223,7 +235,14 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--golden", default=str(eg.DEFAULT_GOLDEN), help="JSONL/JSON с разметкой")
     parser.add_argument("--limit", type=int, help="первые N вопросов")
     parser.add_argument("--save-dir", help="каталог индекса HippoRAG")
-    parser.add_argument("--llm-name", help="имя модели в LM Studio")
+    parser.add_argument("--llm-name", help="имя каталога индекса (config.llm_name)")
+    parser.add_argument(
+        "--llm-api-name",
+        help=(
+            "id модели в API, если он отличается от имени каталога индекса "
+            "(LM Studio: google/gemma-4-e4b при каталоге gemma-4-e4b)"
+        ),
+    )
     parser.add_argument("--llm-base-url", help="OpenAI-совместимый endpoint LM Studio")
     parser.add_argument("--embedding-model", help="модель эмбеддингов индекса")
     parser.add_argument(

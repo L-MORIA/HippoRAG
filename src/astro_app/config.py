@@ -14,6 +14,10 @@ load_dotenv()
 
 SAVE_DIR = "outputs/astrology_test"
 LLM_NAME = os.getenv("LLM_NAME", "gemma-4-e4b")
+#: Идентификатор модели в API. Может отличаться от `LLM_NAME`: `LLM_NAME` задаёт
+#: каталог индекса (`build_working_dir`), а LM Studio принимает, например,
+#: `google/gemma-4-e4b` при каталоге `gemma-4-e4b`.
+LLM_API_NAME = os.getenv("LLM_API_NAME", LLM_NAME)
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:1234/v1")
 EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
 
@@ -59,6 +63,7 @@ def load_hipporag(
     *,
     save_dir: str | None = None,
     llm_base_url: str | None = None,
+    llm_api_name: str | None = None,
     embedding_model_name: str | None = None,
     qa_top_k: int | None = None,
     qa_strict_grounding: bool | None = None,
@@ -83,6 +88,7 @@ def load_hipporag(
     config = BaseConfig(
         save_dir=save_dir or SAVE_DIR,
         llm_name=llm_name or LLM_NAME,
+        llm_api_name=llm_api_name,
         llm_base_url=llm_base_url or LLM_BASE_URL,
         embedding_model_name=embedding_model_name or EMBEDDING_MODEL,
         linking_top_k=100,

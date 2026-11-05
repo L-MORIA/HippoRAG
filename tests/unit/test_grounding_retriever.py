@@ -275,12 +275,50 @@ def test_load_engine_passes_eval_overrides(monkeypatch):
 
     assert captured == {
         "llm_name": "model",
+        "llm_api_name": None,
         "save_dir": "idx",
         "llm_base_url": "http://localhost:1234/v1",
         "embedding_model_name": "embed",
         "qa_top_k": 8,
         "qa_strict_grounding": False,
     }
+
+
+def test_load_engine_uses_separate_api_name(monkeypatch):
+    """Каталог индекса и id модели в API могут различаться (LM Studio)."""
+    import astro_app.config as config
+
+    captured = {}
+
+    def fake_load_hipporag(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(config, "load_hipporag", fake_load_hipporag)
+    monkeypatch.delenv("LLM_NAME", raising=False)
+    args = gr.parse_args(
+        [
+            "--llm-name",
+            "gemma-4-e4b",
+            "--llm-api-name",
+            "google/gemma-4-e4b",
+        ]
+    )
+
+    gr.load_engine(args)
+
+    assert captured["llm_name"] == "gemma-4-e4b"
+    assert captured["llm_api_name"] == "google/gemma-4-e4b"
+
+    run_config = gr.engine_run_config(
+        SimpleNamespace(
+            global_config=SimpleNamespace(llm_name="gemma-4-e4b", llm_api_name="google/gemma-4-e4b")
+        ),
+        args,
+        5,
+    )
+    assert run_config["llm_name"] == "gemma-4-e4b"
+    assert run_config["llm_api_name"] == "google/gemma-4-e4b"
 
 
 def test_resolve_qa_top_k_falls_back_to_engine_config():

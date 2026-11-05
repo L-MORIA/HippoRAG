@@ -23,20 +23,53 @@
   `runtime_error:<Type>` и не роняет весь прогон.
 - Логи `/search`: `abstained`, `grounding_errors`, `used_citations`,
   `retrieved_docs`, latency и p95.
+- `scripts/grounding_astro_retriever.py` — второй real-eval адаптер: прогоняет
+  golden set через продуктовый режим 5 (BM25 + RU-CE), а не через
+  `HippoRAG.rag_qa`; настройки — `ASTRO_RETRIEVER_TOP_K`, `ASTRO_SAVE_DIR`,
+  `ASTRO_LLM_NAME`, `ASTRO_LLM_API_NAME`, `ASTRO_LLM_BASE_URL`.
+- `llm_api_name` в `BaseConfig` / `OpenAILLM` / `astro_app.config` и флаг
+  `--llm-api-name`: id модели для API теперь можно задать отдельно от имени
+  каталога индекса (LM Studio принимает только `google/gemma-4-e4b`, а индекс
+  лежит в каталоге `gemma-4-e4b`). Env — `LLM_API_NAME`, `ASTRO_LLM_API_NAME`.
+- Отчёт `docs/H2_6_GROUNDING_REPORT_2026-11-05.md` — замер на golden set,
+  диагностика ретрива и разбор потерь по вопросам.
 
 ### Изменено
 - `qa_strict_grounding=True` по умолчанию: ответ без валидных inline-ссылок
   заменяется отказом. Аварийный откат — `qa_strict_grounding=False`.
 - Ответы режимов 12/19/21 вместо свободного текста возвращают
   `ОТВЕТ / ИСТОЧНИКИ / ОТКАЗ`.
+- `qa_top_k` оставлен **5**: на 8 ложные ответы HippoRAG растут 7,7 % → 15,4 %,
+  accuracy режима 5 падает 56,5 % → 52,2 %. `grounded_qa.lmstudio_chat`
+  использует `LLM_API_NAME` вместо жёсткого `LLM_NAME`.
+
+### Измерено (2026-11-05)
+36 вопросов (answerable 23, borderline 5, unanswerable 13), индекс
+`outputs/astrology_test/gemma-4-e4b_…`, LM Studio `google/gemma-4-e4b`:
+
+| Метрика | HippoRAG @5 | Режим 5 @5 | Порог |
+|---|---:|---:|---:|
+| Answer rate | 34,8 % | **73,9 %** | ≥ 90 % |
+| Abstention | 92,3 % | 92,3 % | ≥ 90 % |
+| False answer rate | 7,7 % | 7,7 % | ≤ 10 % |
+| Citation precision / recall | 0,125 / 0,125 | **0,667 / 0,765** | ≥ 0,80 |
+| Marker validity | 1,000 | 1,000 | ≥ 1,00 |
+| Uncited sentences | 0 % | 0 % | ≤ 10 % |
+| Answer accuracy | 8,7 % | **56,5 %** | ≥ 70 % |
+
+Page recall@5: графовый путь 8,7 %, режим 5 — 56,5 % (при 50 фрагментах
+65,2 %). Ablation `qa_top_k`: 5 → 8 не улучшает ни один путь. Всё остальное
+упирается в ретрив — задача H1-6 в roadmap.
 
 ### Ограничения
 - Режимы 9–11 (`sign_zones`) осознанно не переведены на Q&A-контракт: это
   извлечение материала, резюме и стилистическая обработка, а не ответ на
   вопрос.
 - Отчёт `eval/grounding/report_2026-11-04.*` проверяет механику на stub-LLM
-  (`quality_measurement=false`); real-eval адаптер готов, но реальный замер
-  качества требует индекса и LM Studio.
+  (`quality_measurement=false`); реальные числа — в отчётах
+  `report_top5/8.*` и `report_mode5*.*`.
+- Три порога (answer rate, accuracy, citation precision) не выполнены по
+  причине ретрива: у 6 из 10 потерь размеченной страницы не было в контексте.
 
 ## 2026-05-14 — 23 метода, QA Cache, 4 модели
 

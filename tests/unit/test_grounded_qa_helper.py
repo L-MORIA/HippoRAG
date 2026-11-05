@@ -5,6 +5,9 @@
 нумерованные фрагменты, проверка ссылок и общий отказ.
 """
 
+import sys
+
+from astro_app import grounded_qa as gq
 from astro_app.grounded_qa import (
     Fragment,
     answer_grounded,
@@ -140,3 +143,33 @@ def test_used_sources_lists_only_cited_fragments():
 
     assert "[2] Книга B, стр. 2" in text
     assert "Книга A" not in text
+
+
+def test_lmstudio_chat_asks_for_api_model_name(monkeypatch):
+    """LM Studio принимает google/gemma-4-e4b, а каталог индекса — gemma-4-e4b."""
+    sent = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    def fake_post(url, json=None, timeout=None):
+        sent.update(json)
+        return FakeResponse()
+
+    fake_httpx = type(
+        "FakeHttpx",
+        (),
+        {
+            "get": staticmethod(lambda url, timeout=None: FakeResponse()),
+            "post": staticmethod(fake_post),
+        },
+    )
+    monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
+    monkeypatch.setattr(gq, "LLM_API_NAME", "google/gemma-4-e4b")
+    monkeypatch.setattr(gq, "LLM_BASE_URL", "http://localhost:1234/v1")
+
+    assert gq.lmstudio_chat([{"role": "user", "content": "привет"}]) == "ok"
+    assert sent["model"] == "google/gemma-4-e4b"

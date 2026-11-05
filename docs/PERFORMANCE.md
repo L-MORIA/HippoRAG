@@ -90,6 +90,29 @@
   `recall@k_page` и `mrr@k_page`), поэтому в снимке он `null`, а не догадка.
   Считается теперь — `summarize_mode` отдаёт `ndcg@k_page` (аудит 04.11.2026).
 
+### 3.2. Recall ретриверов на golden set заземления (23 answerable, §H2-6)
+
+Другой набор и другая метрика, чем в §3.1: здесь важно, попала ли **размеченная
+страница** в контекст, который получает LLM. Источник —
+[H2_6_GROUNDING_REPORT_2026-11-05.md](./H2_6_GROUNDING_REPORT_2026-11-05.md),
+`eval/grounding/golden_qa.jsonl`.
+
+| Ретривер | recall@5 (стр) | @10 | @20 | @50 | p50 полного ответа |
+|---|---:|---:|---:|---:|---:|
+| HippoRAG graph (факты + PPR) | 8,7 % | 17,4 % | 30,4 % | 65,2 % | 21,6 с |
+| HippoRAG dense (DPR) | 21,7 % | 21,7 % | 34,8 % | 69,6 % | — |
+| Режим 5 (BM25 + RU-CE) | **56,5 %** | **65,2 %** | — | — | **12,9 с** |
+
+Выводы для бюджета и выбора пути:
+
+* продуктовый режим 5 — не только самый быстрый, но и в 6,5 раза точнее
+  графового `HippoRAG.rag_qa` по страничному recall@5 при том же индексе;
+* графовый путь на трёх книгах проигрывает даже обычному dense: сущностные
+  связи вытесняют нужную страницу;
+* подъём `qa_top_k` 5 → 8 не компенсирует промахи: у режима 5 recall@10 = 65,2 %
+  (recall@50 не мерялся), у графа потолок recall@50 = 65,2 % — рычаг в ретриве,
+  а не в размере контекста. Задача — H1-6 в `ROADMAP_REVISION_DEEPSEEK.md`.
+
 ## 4. Как воспроизвести и переизмерить
 
 ```bash
@@ -146,6 +169,7 @@ python scripts/benchmark_budget.py --from-report outputs/reports/eval_mode5.json
 * План: `ROADMAP_REVISION_DEEPSEEK.md`, раздел H1-3 (задача и приёмка);
 * выбор режима по умолчанию: `MAVIS_ROUND3_REMARKS.md`, §7.3;
 * замеры H1-3 и решение по default: `H1_3_LATENCY_REPORT_2026-11-04.md`, §3 и §7;
+* recall ретриверов на golden set заземления: `H2_6_GROUNDING_REPORT_2026-11-05.md`;
 * контракт бюджета в коде: `src/astro_app/performance.py`;
 * измеритель H1-1: `scripts/eval_search_quality.py`;
 * числа замера: `eval/dataset/RESULTS_REPORTED.md`.

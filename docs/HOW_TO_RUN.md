@@ -64,10 +64,18 @@ curl http://localhost:1234/v1/models
 Создайте в корне проекта файл `.env` (он в `.gitignore`, в git не попадёт):
 
 ```dotenv
-LLM_NAME=google/gemma-4-e4b
+LLM_NAME=gemma-4-e4b
+LLM_API_NAME=google/gemma-4-e4b
 LLM_BASE_URL=http://localhost:1234/v1
 SAVE_DIR=outputs/astrology
 ```
+
+`LLM_NAME` — имя каталога индекса (по нему строится путь в `outputs/`),
+`LLM_API_NAME` — идентификатор модели в запросе к LM Studio. У LM Studio они
+обычно различаются: индекс лежит в каталоге `gemma-4-e4b`, а API принимает
+`google/gemma-4-e4b`; если отправить короткое имя, сервер вернёт
+`400 Invalid model identifier`. Если `LLM_API_NAME` не задан, используется
+`LLM_NAME`.
 
 `SAVE_DIR` важен: индексатор по умолчанию пишет в `outputs/astrology`, а
 приложение без этой переменной читает `outputs/astrology_test`. Одна и та же
@@ -197,6 +205,20 @@ python scripts/grounding_retriever.py \
 качества, а не проверка механики. Код возврата: `0` — пороги выполнены,
 `1` — есть проваленные пороги, `2` — ошибка разметки или запуска.
 
+Если id модели в API не совпадает с именем каталога индекса, задайте его
+отдельно — иначе LM Studio вернёт `400 Invalid model identifier`:
+
+```bash
+python scripts/grounding_retriever.py \
+  --save-dir outputs/astrology_test \
+  --llm-name gemma-4-e4b \
+  --llm-api-name google/gemma-4-e4b \
+  --llm-base-url http://localhost:1234/v1
+```
+
+`--llm-name` выбирает каталог индекса и кэш, `--llm-api-name` уходит в запрос
+к API (то же самое через env `LLM_API_NAME`).
+
 Чтобы сравнить `qa_top_k`, задайте отдельные пути, иначе отчёты перезапишут
 друг друга:
 
@@ -216,6 +238,26 @@ python scripts/grounding_retriever.py --qa-top-k 8 \
 добавляется шум. Ошибка на отдельном вопросе не роняет прогон — она
 записывается как `runtime_error:<Type>`; `--fail-fast` останавливает
 на первой ошибке, `--no-strict` отключает замену ответа без цитат на отказ.
+
+#### Замер по продуктовому режиму 5 (BM25 + RU-CE)
+
+`HippoRAG.rag_qa` и режим 5 — разные ретриверы, поэтому и числа у них разные.
+Второй адаптер прогоняет golden set через режим 5:
+
+```bash
+$env:ASTRO_RETRIEVER_TOP_K = "5"
+$env:LLM_API_NAME = "google/gemma-4-e4b"
+python scripts/eval_grounding.py --run \
+  --retriever grounding_astro_retriever:retrieve \
+  --out-json eval/grounding/report_mode5.json \
+  --out-md eval/grounding/report_mode5.md \
+  --out-predictions eval/grounding/predictions_mode5.jsonl
+```
+
+Настройки адаптера: `ASTRO_RETRIEVER_TOP_K` (сколько фрагментов идёт в LLM),
+`ASTRO_SAVE_DIR` (каталог индекса), `ASTRO_LLM_NAME`, `ASTRO_LLM_API_NAME`,
+`ASTRO_LLM_BASE_URL`. Сравнение путей и выводы — в
+[H2_6_GROUNDING_REPORT_2026-11-05.md](./H2_6_GROUNDING_REPORT_2026-11-05.md).
 
 ## 8. Тесты
 

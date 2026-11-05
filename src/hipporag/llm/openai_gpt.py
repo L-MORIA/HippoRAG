@@ -137,7 +137,11 @@ class CacheOpenAI(BaseLLM):
         self.cache_dir = cache_dir
         self.global_config = global_config
 
-        self.llm_name = os.environ.get("LLM_NAME", global_config.llm_name)
+        self.llm_name = (
+            getattr(global_config, "llm_api_name", None)
+            or os.environ.get("LLM_NAME")
+            or global_config.llm_name
+        )
         # Check environment for LM Studio or other local LLM
         self.llm_base_url = os.environ.get("LLM_BASE_URL", global_config.llm_base_url)
 

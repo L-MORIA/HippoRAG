@@ -15,6 +15,16 @@ class BaseConfig:
     llm_name: str = field(
         default="gpt-4o-mini", metadata={"help": "Class name indicating which LLM model to use."}
     )
+    llm_api_name: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Идентификатор модели в API, если он отличается от llm_name "
+                "(llm_name задаёт каталог индекса; LM Studio принимает "
+                "google/gemma-4-e4b при каталоге gemma-4-e4b)."
+            )
+        },
+    )
     llm_base_url: str = field(
         default=None,
         metadata={"help": "Base URL for the LLM model, if none, means using OPENAI service."},
@@ -284,6 +294,10 @@ class BaseConfig:
         env_llm_name = os.environ.get("LLM_NAME")
         if env_llm_name:
             self.llm_name = env_llm_name
+
+        env_llm_api_name = os.environ.get("LLM_API_NAME")
+        if env_llm_api_name:
+            self.llm_api_name = env_llm_api_name
 
         env_llm_base_url = os.environ.get("LLM_BASE_URL")
         if env_llm_base_url:

@@ -23,7 +23,7 @@ from hipporag.qa.grounding import (
 )
 from hipporag.utils.custom_types import Citation
 
-from .config import LLM_BASE_URL, LLM_NAME
+from .config import LLM_API_NAME, LLM_BASE_URL
 
 ChatFn = Callable[[List[Dict[str, str]]], str]
 
@@ -126,7 +126,7 @@ def lmstudio_chat(
         response = httpx.post(
             f"{api_url}/v1/chat/completions",
             json={
-                "model": LLM_NAME,
+                "model": LLM_API_NAME,
                 "messages": messages,
                 "max_tokens": max_tokens,
                 "temperature": temperature,
