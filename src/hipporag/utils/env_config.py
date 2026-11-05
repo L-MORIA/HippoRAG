@@ -171,7 +171,11 @@ class LoggingConfig(BaseSettings):
 class HippoRAGConfig(BaseSettings):
     """Main configuration for HippoRAG."""
 
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
+    # extra="ignore": корневой .env содержит ключи приложения (LLM_NAME,
+    # LLM_BASE_URL, SAVE_DIR), которые не являются полями HippoRAGConfig.
+    model_config = SettingsConfigDict(
+        env_file=".env", case_sensitive=False, extra="ignore"
+    )
 
     # Sub-configurations
     llm: LLMConfig = Field(default_factory=LLMConfig)
