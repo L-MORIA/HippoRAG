@@ -1,0 +1,366 @@
+{
+  "index_dir": "C:\\Users\\User\\PycharmProjects\\hipporag\\outputs\\astrology_test\\gemma-4-e4b_sentence-transformers_paraphrase-multilingual-mpnet-base-v2",
+  "golden": "C:\\Users\\User\\PycharmProjects\\hipporag\\eval\\grounding\\golden_qa.jsonl",
+  "questions": 23,
+  "pages": 653,
+  "ce_pool": 100,
+  "expansion": true,
+  "dense_model": "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
+  "summary": {
+    "bm25": {
+      "recall@5": 0.6087,
+      "recall@10": 0.6522,
+      "recall@20": 0.6957,
+      "recall@50": 0.8261,
+      "mrr@10": 0.4732
+    },
+    "bm25_ce": {
+      "recall@5": 0.6522,
+      "recall@10": 0.7391,
+      "recall@20": 0.7826,
+      "recall@50": 0.8696,
+      "mrr@10": 0.5287
+    },
+    "bm25_ce_chunk": {
+      "recall@5": 0.6957,
+      "recall@10": 0.7391,
+      "recall@20": 0.8261,
+      "recall@50": 0.8696,
+      "mrr@10": 0.5338
+    },
+    "dense_mean": {
+      "recall@5": 0.2609,
+      "recall@10": 0.3043,
+      "recall@20": 0.3913,
+      "recall@50": 0.5652,
+      "mrr@10": 0.1707
+    },
+    "dense_max": {
+      "recall@5": 0.2609,
+      "recall@10": 0.3478,
+      "recall@20": 0.4783,
+      "recall@50": 0.6522,
+      "mrr@10": 0.1923
+    },
+    "rrf": {
+      "recall@5": 0.4783,
+      "recall@10": 0.4783,
+      "recall@20": 0.6522,
+      "recall@50": 0.8261,
+      "mrr@10": 0.371
+    },
+    "rrf_ce": {
+      "recall@5": 0.7391,
+      "recall@10": 0.8261,
+      "recall@20": 0.913,
+      "recall@50": 0.913,
+      "mrr@10": 0.5062
+    }
+  },
+  "rows": [
+    {
+      "id": "a01-astro-author-edition",
+      "gold": [
+        "астрофэншуй квартиры:2"
+      ],
+      "bm25": 101,
+      "bm25_ce": 101,
+      "bm25_ce_chunk": 101,
+      "dense_mean": 183,
+      "dense_max": 210,
+      "rrf": 161,
+      "rrf_ce": 161
+    },
+    {
+      "id": "a02-psy-author",
+      "gold": [
+        "психологический фэншуй:2"
+      ],
+      "bm25": 30,
+      "bm25_ce": 3,
+      "bm25_ce_chunk": 2,
+      "dense_mean": 243,
+      "dense_max": 228,
+      "rrf": 60,
+      "rrf_ce": 3
+    },
+    {
+      "id": "a03-psy-subtitle",
+      "gold": [
+        "психологический фэншуй:2"
+      ],
+      "bm25": 25,
+      "bm25_ce": 25,
+      "bm25_ce_chunk": 4,
+      "dense_mean": 210,
+      "dense_max": 190,
+      "rrf": 42,
+      "rrf_ce": 2
+    },
+    {
+      "id": "a04-psy-year-pages",
+      "gold": [
+        "психологический фэншуй:2"
+      ],
+      "bm25": 138,
+      "bm25_ce": 138,
+      "bm25_ce_chunk": 138,
+      "dense_mean": 55,
+      "dense_max": 72,
+      "rrf": 78,
+      "rrf_ce": 3
+    },
+    {
+      "id": "a05-astro-isbn",
+      "gold": [
+        "астрофэншуй квартиры:2"
+      ],
+      "bm25": 1,
+      "bm25_ce": 1,
+      "bm25_ce_chunk": 1,
+      "dense_mean": 143,
+      "dense_max": 159,
+      "rrf": 12,
+      "rrf_ce": 1
+    },
+    {
+      "id": "a06-eso-publisher-license",
+      "gold": [
+        "эзотерический фэншуй:2"
+      ],
+      "bm25": 2,
+      "bm25_ce": 2,
+      "bm25_ce_chunk": 1,
+      "dense_mean": 374,
+      "dense_max": 410,
+      "rrf": 12,
+      "rrf_ce": 1
+    },
+    {
+      "id": "a07-owen-zones",
+      "gold": [
+        "астрофэншуй квартиры:7"
+      ],
+      "bm25": 118,
+      "bm25_ce": 118,
+      "bm25_ce_chunk": 118,
+      "dense_mean": 66,
+      "dense_max": 34,
+      "rrf": 60,
+      "rrf_ce": 5
+    },
+    {
+      "id": "a08-owen-secular",
+      "gold": [
+        "астрофэншуй квартиры:109"
+      ],
+      "bm25": 1,
+      "bm25_ce": 1,
+      "bm25_ce_chunk": 1,
+      "dense_mean": 5,
+      "dense_max": 2,
+      "rrf": 1,
+      "rrf_ce": 1
+    },
+    {
+      "id": "a09-taurus-secular",
+      "gold": [
+        "астрофэншуй квартиры:109"
+      ],
+      "bm25": 20,
+      "bm25_ce": 7,
+      "bm25_ce_chunk": 9,
+      "dense_mean": 25,
+      "dense_max": 39,
+      "rrf": 16,
+      "rrf_ce": 7
+    },
+    {
+      "id": "a10-scorpio-zones",
+      "gold": [
+        "астрофэншуй квартиры:94"
+      ],
+      "bm25": 10,
+      "bm25_ce": 47,
+      "bm25_ce_chunk": 18,
+      "dense_mean": 134,
+      "dense_max": 81,
+      "rrf": 22,
+      "rrf_ce": 54
+    },
+    {
+      "id": "a11-dominant-zone",
+      "gold": [
+        "астрофэншуй квартиры:98"
+      ],
+      "bm25": 1,
+      "bm25_ce": 1,
+      "bm25_ce_chunk": 1,
+      "dense_mean": 12,
+      "dense_max": 9,
+      "rrf": 1,
+      "rrf_ce": 1
+    },
+    {
+      "id": "a12-shen-qi",
+      "gold": [
+        "эзотерический фэншуй:27"
+      ],
+      "bm25": 1,
+      "bm25_ce": 1,
+      "bm25_ce_chunk": 1,
+      "dense_mean": 1,
+      "dense_max": 1,
+      "rrf": 1,
+      "rrf_ce": 1
+    },
+    {
+      "id": "a13-gua1-shen-qi",
+      "gold": [
+        "эзотерический фэншуй:110"
+      ],
+      "bm25": 4,
+      "bm25_ce": 4,
+      "bm25_ce_chunk": 3,
+      "dense_mean": 7,
+      "dense_max": 11,
+      "rrf": 5,
+      "rrf_ce": 5
+    },
+    {
+      "id": "a14-bagua-squares",
+      "gold": [
+        "психологический фэншуй:3"
+      ],
+      "bm25": 37,
+      "bm25_ce": 3,
+      "bm25_ce_chunk": 21,
+      "dense_mean": 24,
+      "dense_max": 35,
+      "rrf": 18,
+      "rrf_ce": 18
+    },
+    {
+      "id": "a15-house4",
+      "gold": [
+        "астрофэншуй квартиры:139"
+      ],
+      "bm25": 1,
+      "bm25_ce": 1,
+      "bm25_ce_chunk": 3,
+      "dense_mean": 3,
+      "dense_max": 2,
+      "rrf": 1,
+      "rrf_ce": 1
+    },
+    {
+      "id": "a16-traditional-style",
+      "gold": [
+        "психологический фэншуй:19"
+      ],
+      "bm25": 3,
+      "bm25_ce": 1,
+      "bm25_ce_chunk": 1,
+      "dense_mean": 20,
+      "dense_max": 9,
+      "rrf": 2,
+      "rrf_ce": 1
+    },
+    {
+      "id": "a17-wealth-zone",
+      "gold": [
+        "психологический фэншуй:113"
+      ],
+      "bm25": 1,
+      "bm25_ce": 1,
+      "bm25_ce_chunk": 1,
+      "dense_mean": 96,
+      "dense_max": 28,
+      "rrf": 2,
+      "rrf_ce": 2
+    },
+    {
+      "id": "a18-meta-zodiac",
+      "gold": [
+        "астрофэншуй квартиры:160"
+      ],
+      "bm25": 1,
+      "bm25_ce": 1,
+      "bm25_ce_chunk": 1,
+      "dense_mean": 1,
+      "dense_max": 1,
+      "rrf": 1,
+      "rrf_ce": 2
+    },
+    {
+      "id": "b01-owen-two-forms",
+      "gold": [
+        "астрофэншуй квартиры:109",
+        "астрофэншуй квартиры:110"
+      ],
+      "bm25": 1,
+      "bm25_ce": 1,
+      "bm25_ce_chunk": 1,
+      "dense_mean": 30,
+      "dense_max": 14,
+      "rrf": 3,
+      "rrf_ce": 3
+    },
+    {
+      "id": "b02-shen-qi-gua1",
+      "gold": [
+        "эзотерический фэншуй:110",
+        "эзотерический фэншуй:27"
+      ],
+      "bm25": 1,
+      "bm25_ce": 1,
+      "bm25_ce_chunk": 1,
+      "dense_mean": 4,
+      "dense_max": 5,
+      "rrf": 1,
+      "rrf_ce": 1
+    },
+    {
+      "id": "b03-scorpio-taurus",
+      "gold": [
+        "астрофэншуй квартиры:109",
+        "астрофэншуй квартиры:94"
+      ],
+      "bm25": 5,
+      "bm25_ce": 10,
+      "bm25_ce_chunk": 14,
+      "dense_mean": 98,
+      "dense_max": 187,
+      "rrf": 31,
+      "rrf_ce": 10
+    },
+    {
+      "id": "b04-owen-planet-kitchen",
+      "gold": [
+        "астрофэншуй квартиры:110",
+        "астрофэншуй квартиры:7"
+      ],
+      "bm25": 95,
+      "bm25_ce": 12,
+      "bm25_ce_chunk": 4,
+      "dense_mean": 42,
+      "dense_max": 18,
+      "rrf": 46,
+      "rrf_ce": 12
+    },
+    {
+      "id": "b05-ryby-spalnya",
+      "gold": [
+        "астрофэншуй квартиры:105",
+        "астрофэншуй квартиры:108"
+      ],
+      "bm25": 2,
+      "bm25_ce": 2,
+      "bm25_ce_chunk": 2,
+      "dense_mean": 1,
+      "dense_max": 1,
+      "rrf": 1,
+      "rrf_ce": 2
+    }
+  ]
+}
