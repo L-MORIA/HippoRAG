@@ -41,9 +41,22 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set
 
 from . import versions
-from .page_retrieval import reset_page_index_cache
 
 logger = logging.getLogger(__name__)
+
+
+def _reset_page_cache() -> None:
+    """Сбросить кэш page-индекса (H1-6).
+
+    Ленивый импорт: модульный импорт ``astro_app.page_retrieval`` здесь
+    замыкает круг ``hipporag/__init__ → search_api.server → index_lifecycle``
+    при входе в приложение через ``astro_app.modes``, поэтому тянем его
+    только в момент операции.
+    """
+    from .page_retrieval import reset_page_index_cache
+
+    reset_page_index_cache()
+
 
 #: Имя каталога резервных копий рядом с каталогом индекса.
 BACKUP_DIR_NAME = "backups"
@@ -387,7 +400,7 @@ class IndexLifecycle:
             shutil.rmtree(old_dir, ignore_errors=True)
             # Каталог индекса подменён: кэш page-индекса мог остаться от
             # прежнего содержимого (id-переиспользование), сбрасываем явно.
-            reset_page_index_cache()
+            _reset_page_cache()
             return {
                 "restored": archive.name,
                 "working_dir": str(self.index_dir),
@@ -485,7 +498,7 @@ class IndexLifecycle:
                 self._write_manifest(hipporag)
                 # В store добавились чанки: сбрасываем кэш page-индекса,
                 # иначе page-level выдача не увидит новые страницы.
-                reset_page_index_cache()
+                _reset_page_cache()
                 result = {
                     "backup": backup,
                     "deleted": deleted,

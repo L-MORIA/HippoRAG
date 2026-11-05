@@ -288,7 +288,7 @@ def test_reindex_resets_page_index_cache(index_env, tmp_path, monkeypatch):
 
     lifecycle, hipporag, _ = index_env
     resets = []
-    monkeypatch.setattr(il, "reset_page_index_cache", lambda: resets.append(True))
+    monkeypatch.setattr(il, "_reset_page_cache", lambda: resets.append(True))
 
     pdf = tmp_path / "a.pdf"
     pdf.write_bytes(b"%PDF-1.4 test")
@@ -305,7 +305,7 @@ def test_restore_resets_page_index_cache(index_env, monkeypatch):
     lifecycle, _, _ = index_env
     backup = lifecycle.backup(label="cache-check")
     resets = []
-    monkeypatch.setattr(il, "reset_page_index_cache", lambda: resets.append(True))
+    monkeypatch.setattr(il, "_reset_page_cache", lambda: resets.append(True))
 
     lifecycle.restore(backup["name"])
 
