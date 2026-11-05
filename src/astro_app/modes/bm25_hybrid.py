@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from ..page_retrieval import search_pages_hybrid
+from ..page_retrieval import page_level_enabled, search_pages_hybrid
 from ..primitives import _build_bm25, _get_chunk_meta
 from ..query import _expand_query, split_query_terms
 from ..rerankers import _rerank_with_crossencoder, _rerank_with_crossencoder_ru
@@ -84,6 +84,21 @@ def search_bm25_hybrid_ru_pages(hipporag, query, top_k=5, **kwargs):
     занимают несколько слотов выдачи.
     """
     return search_pages_hybrid(hipporag, query, top_k=top_k, **kwargs)
+
+
+def bm25_hybrid_ru_mode(hipporag, query, top_k=10, candidate_pool=200):
+    """Функция режима 5 в реестре: page-level H1-6 по умолчанию.
+
+    По умолчанию возвращает ``PageHit`` (страница — единица выдачи продукта,
+    page recall@5 87,0 % на M7); параметры page-пути — дефолты
+    ``search_pages_hybrid`` (pool 50, max 4000 — как в замере M7).
+    ``ASTRO_RETRIEVER_PAGE_LEVEL=0`` возвращает прежний чанковый путь
+    ``search_bm25_hybrid_ru`` (кортежи текст/скор/dpr/bm25/boost) — он же
+    используется режимами 19/21 и eval-адаптерами, поэтому сам не меняется.
+    """
+    if page_level_enabled():
+        return search_pages_hybrid(hipporag, query, top_k=top_k)
+    return search_bm25_hybrid_ru(hipporag, query, top_k=top_k, candidate_pool=candidate_pool)
 
 
 def search_rrf_context(hipporag, query, top_k=10, candidate_pool=150, context_window=1):

@@ -277,3 +277,36 @@ def test_embedding_store_remove_metadata_entries(tmp_path):
     entries = store.get_all_metadata_entries(hash_id)
     assert [entry["source_file"] for entry in entries] == ["b.pdf"]
     assert store.remove_metadata_entries(hash_id, {"a.pdf"}) is False
+
+
+# ── сброс кэша page-индекса (H1-6: page-level в UI) ─────────────────────────
+
+
+def test_reindex_resets_page_index_cache(index_env, tmp_path, monkeypatch):
+    """После reindex кэш page-индекса должен сбрасываться (новые страницы)."""
+    from astro_app import index_lifecycle as il
+
+    lifecycle, hipporag, _ = index_env
+    resets = []
+    monkeypatch.setattr(il, "reset_page_index_cache", lambda: resets.append(True))
+
+    pdf = tmp_path / "a.pdf"
+    pdf.write_bytes(b"%PDF-1.4 test")
+    lifecycle.reindex([str(pdf)])
+
+    assert hipporag.indexed == [str(pdf)]
+    assert resets == [True]
+
+
+def test_restore_resets_page_index_cache(index_env, monkeypatch):
+    """После restore кэш page-индекса должен сбрасываться (старое содержимое)."""
+    from astro_app import index_lifecycle as il
+
+    lifecycle, _, _ = index_env
+    backup = lifecycle.backup(label="cache-check")
+    resets = []
+    monkeypatch.setattr(il, "reset_page_index_cache", lambda: resets.append(True))
+
+    lifecycle.restore(backup["name"])
+
+    assert resets == [True]

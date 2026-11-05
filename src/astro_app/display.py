@@ -1,5 +1,6 @@
 """Отображение результатов поиска в консоли (перенос из main.py, шаг 2)."""
 
+from .page_retrieval import PageHit
 from .textutils import fix_chunk_start, show_text_safe
 
 
@@ -19,6 +20,22 @@ def show_results(query, results, mode_name, reformulated=None):
     is_full_material = mode_name in ("Весь знак", "Резюме", "Self-RAG")
 
     for i, r in enumerate(results, 1):
+        if isinstance(r, PageHit):
+            # Page-level режим 5 (H1-6): результат — страница, а не чанк.
+            doc = r.text
+            score = r.score
+            page = r.page
+            extra = f" ({page.doc_title or page.source_file} стр.{page.page_num})"
+            has_term = q_lower in doc.lower()
+            marker = " ✅" if has_term else ""
+            print(f"\n--- {i}. (score: {score:.4f}){extra}{marker} ---")
+            clean_doc, was_truncated = fix_chunk_start(doc)
+            display = show_text_safe(clean_doc)
+            if was_truncated:
+                display = "[...обрыв] " + display
+            print(display)
+            print()
+            continue
         # Self-RAG и Small→Big возвращают одну форму: (doc, score, источник,
         # стр.мин, стр.макс, буст) — исключение Self-RAG здесь ломало дисплей
         # режима 12 (ValueError на реальной выдаче).

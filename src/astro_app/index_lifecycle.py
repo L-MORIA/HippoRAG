@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set
 
 from . import versions
+from .page_retrieval import reset_page_index_cache
 
 logger = logging.getLogger(__name__)
 
@@ -384,6 +385,9 @@ class IndexLifecycle:
                 raise
 
             shutil.rmtree(old_dir, ignore_errors=True)
+            # Каталог индекса подменён: кэш page-индекса мог остаться от
+            # прежнего содержимого (id-переиспользование), сбрасываем явно.
+            reset_page_index_cache()
             return {
                 "restored": archive.name,
                 "working_dir": str(self.index_dir),
@@ -479,6 +483,9 @@ class IndexLifecycle:
                 hipporag.index_pdfs(paths)
                 after = self._count_store(hipporag, "chunk_embedding_store")
                 self._write_manifest(hipporag)
+                # В store добавились чанки: сбрасываем кэш page-индекса,
+                # иначе page-level выдача не увидит новые страницы.
+                reset_page_index_cache()
                 result = {
                     "backup": backup,
                     "deleted": deleted,

@@ -93,10 +93,10 @@ MODES: dict[str, ModeSpec] = {
     ),
     "5": ModeSpec(
         label="BM25+CE-ru",
-        menu="BM25 + RU-CE + Query expansion",
-        fn=bm25_hybrid.search_bm25_hybrid_ru,
+        menu="BM25 + RU-CE + Query expansion (page-level H1-6)",
+        fn=bm25_hybrid.bm25_hybrid_ru_mode,
         star=True,
-        when="по умолчанию: p95 225 мс, recall@5 (стр) 65,0 %, LLM не нужен",
+        when="по умолчанию: page-level H1-6, page recall@5 87,0 % (M7); чанковый — ASTRO_RETRIEVER_PAGE_LEVEL=0",
     ),
     "6": ModeSpec(
         label="Small→Big-ru",

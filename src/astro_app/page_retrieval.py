@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -81,6 +82,18 @@ def reset_page_index_cache() -> None:
     global _CACHE_KEY, _CACHE_INDEX
     _CACHE_KEY = None
     _CACHE_INDEX = None
+
+
+def page_level_enabled() -> bool:
+    """H1-6: page-level выдача режима 5 включена по умолчанию.
+
+    Единица выдачи продукта — страница, а не чанк (page recall@5 87,0 % на
+    M7 против потолка чанков). Чанковый вариант возвращается при
+    ``ASTRO_RETRIEVER_PAGE_LEVEL=0`` (или false/no/off). Та же переменная и
+    то же умолчание, что в адаптере ``scripts/grounding_astro_retriever.py``.
+    """
+    raw = os.getenv("ASTRO_RETRIEVER_PAGE_LEVEL", "1").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
 
 
 def _metadata_entries(store, idx: int) -> List[Dict]:
