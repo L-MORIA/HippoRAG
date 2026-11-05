@@ -74,6 +74,99 @@ LLM-переформулировку. Сравнение «до/после» д�
 | 19 «GraphRAG» | 16.6 с | 33.0 с | 30 с | experimental |
 | 12 «Self-RAG» | 23.8 с | 37.9 с | 30 с | experimental |
 
+## M1–M8: замеры 2026-11-05
+
+Источник: коммиты `e0c27b8` (M1/M3/M4/M8) и `44f449e` (M7). Сырые отчёты —
+`outputs/reports/eval_recall10.{json,md}`, `outputs/reports/page_ceiling.json`
+и `outputs/reports/grounding_eval.{json,md}`. Подробный разбор, условия и
+команды — в [docs/MEASUREMENT_REPORT_2026-11-05.md](../../docs/MEASUREMENT_REPORT_2026-11-05.md).
+
+| # | Метрика | Результат | Цель | Вердикт |
+|---|---|---|---|---|
+| M1 | Recall@10 (документы) | **97.5 %** (режимы 2 и 5, 40 вопросов) | ≥ 85 % | ✅ PASS |
+| M1 | Recall@10 (страницы) | **72.5 %** (режим 2) / **75.0 %** (режим 5) | ≥ 85 % | ❌ ниже цели |
+| M2 | Доля ответов без цитаты | отдельно не измерена; M7: marker validity 1.000, uncited 0.0 % | 0 % | ⏳ нет точной метрики |
+| M3 | `citations[].sources` | оба PDF в цитате | все источники | ✅ PASS |
+| M4 | Покрытие `src/hipporag` | **40 %** (1928 / 4813) | ≥ 40 % | ✅ PASS, на границе |
+| M5 | Установка на чистую машину | не измерена | ≤ 15 мин | ⏳ |
+| M6 | Ablation графа (synonymy on/off) | не измерена | доказать пользу | ⏳ |
+| M7 | Grounding, 8 метрик | **7/8 PASS**; citation precision **0.621** | precision ≥ 0.8 | ⚠️ один провал |
+| M7 | Page recall@5 (H1-6) | **87.0 %** | ≥ 80 % | ✅ PASS |
+| M8 | Page recall@5, 7 упрощённых ретриверов | **73.9 %** (лучший `rrf_ce`) | ≥ 80 % | ❌ для набора; полный путь — 87.0 % |
+
+### M1 — recall@10 по режимам
+
+| Режим | n | recall@10 (док) | recall@10 (стр) | MRR@10 (док) | nDCG@10 (док) | p50 | p95 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 2 «Граф» | 40 | **97.5 %** | 72.5 % | 0.912 | 0.928 | 470 мс | 588 мс |
+| 5 «BM25+CE-ru» | 40 | **97.5 %** | **75.0 %** | 0.902 | 0.921 | 204 мс | 249 мс |
+
+Режим 1 в прогон не включён: в отчёте `llm.available=false`, а режим 1
+использует LLM-переформулировку.
+
+### M7 — grounding на golden set
+
+| Метрика | Значение | Порог | Статус |
+|---|---:|---:|---|
+| Abstention rate (unanswerable) | 92.3 % | ≥ 90 % | ✅ |
+| False answer rate | 7.7 % | ≤ 10 % | ✅ |
+| Answer rate (answerable) | **100.0 %** | ≥ 90 % | ✅ |
+| Citation precision | **0.621** | ≥ 0.80 | ❌ |
+| Citation recall | 0.848 | ≥ 0.80 | ✅ |
+| Marker validity | 1.000 | ≥ 1.000 | ✅ |
+| Uncited sentence rate | 0.0 % | ≤ 10 % | ✅ |
+| Answer accuracy | **73.9 %** | ≥ 70 % | ✅ |
+| **Page recall@5 (H1-6)** | **87.0 %** | ≥ 80 % | ✅ |
+
+36 вопросов (23 answerable, 5 borderline, 13 unanswerable), полный page-level
+путь H1-6, `qa_top_k=5`. Латентность: p50 14 234 мс, p95 25 950 мс.
+Единственный провал — citation precision: модель добавляет лишние цитаты,
+хотя нужные источники находит (citation recall 0.848).
+
+### M8 — ablation page-ретриверов
+
+| Ретривер | R@5 | R@10 | R@20 | R@50 | MRR@10 |
+|---|---:|---:|---:|---:|---:|
+| **rrf_ce** | **73.9 %** | **82.6 %** | 91.3 % | 91.3 % | 0.506 |
+| bm25_ce_chunk | 69.6 % | 73.9 % | 82.6 % | 87.0 % | 0.534 |
+| bm25_ce | 65.2 % | 73.9 % | 78.3 % | 87.0 % | 0.529 |
+| bm25 | 60.9 % | 65.2 % | 69.6 % | 82.6 % | 0.473 |
+| rrf | 47.8 % | 47.8 % | 65.2 % | 82.6 % | 0.371 |
+| dense_max | 26.1 % | 34.8 % | 47.8 % | 65.2 % | 0.192 |
+| dense_mean | 26.1 % | 30.4 % | 39.1 % | 56.5 % | 0.171 |
+
+23 answerable-вопроса golden set, 653 страницы. Лучший из этих семи
+ретриверов — 73.9 % при пороге 80 %. Это **не потолок полного H1-6-пути**:
+M7 на том же golden set даёт 87.0 %. Разница — keyword-boost в
+`page_retrieval.py`, которого нет в упрощённых ретриверах M8. Вывод
+«проблема выше retrieval» верен только для набора M8.
+
+### Команды воспроизведения
+
+```powershell
+# M1
+python scripts/eval_search_quality.py \
+    --index outputs/astrology_test \
+    --modes 2,5 --k 10 --warmup \
+    --out outputs/reports/eval_recall10.json \
+    --markdown-out outputs/reports/eval_recall10.md
+
+# M3
+pytest tests/unit/test_stage0_fixes.py::test_same_text_different_documents_keep_metadata -q
+
+# M4
+pytest --cov=src/hipporag --cov-report=term-missing
+
+# M7
+$env:ASTRO_RETRIEVER_TOP_K = "5"
+python scripts/eval_grounding.py --run --retriever grounding_astro_retriever:retrieve `
+    --out-json outputs/reports/grounding_eval.json `
+    --out-md outputs/reports/grounding_eval.md
+
+# M8
+python scripts/measure_page_ceiling.py
+```
+
 ## Как воспроизвести
 
 ```bash

@@ -610,6 +610,12 @@ gold-страница не попала в контекст. Разбор и ч�
 [H2_6_GROUNDING_REPORT_2026-11-05.md](./H2_6_GROUNDING_REPORT_2026-11-05.md).
 Задача «поднять page recall@5 до 80 %» вынесена в roadmap как P1.
 
+> **Обновление после H1-6 (M7, 2026-11-05).** Page recall@5 — **87,0 %**,
+> answer rate — **100 %**, accuracy — **73,9 %**: пункты answer rate и accuracy
+> теперь пройдены. Citation precision выросла до **0,621**, но порог 0,80
+> ещё не достигнут. Актуальные числа —
+> [MEASUREMENT_REPORT_2026-11-05.md](./MEASUREMENT_REPORT_2026-11-05.md).
+
 ---
 
 ## 10. График

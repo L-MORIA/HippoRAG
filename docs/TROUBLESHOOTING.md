@@ -74,8 +74,9 @@
 
 | Симптом | Причина | Решение |
 |---|---|---|
-| `page recall@5` ниже 80 % | Baseline H1-6, реальный замер ещё не снят | См. [H1_6_PAGE_RETRIEVAL_2026-11-05.md](./H1_6_PAGE_RETRIEVAL_2026-11-05.md) |
-| Answer rate/accuracy ниже порогов | Baseline H2-6 | См. [H2_6_GROUNDING_REPORT_2026-11-05.md](./H2_6_GROUNDING_REPORT_2026-11-05.md) |
+| `page recall@5` ниже 80 % | M8 (ablation упрощённых ретриверов) даёт максимум 73.9 %; полный H1-6-путь в M7 — 87.0 % | Проверьте, что запущен полный путь, а не ablation; см. [MEASUREMENT_REPORT_2026-11-05.md](./MEASUREMENT_REPORT_2026-11-05.md) и [H1_6_PAGE_RETRIEVAL_2026-11-05.md](./H1_6_PAGE_RETRIEVAL_2026-11-05.md) |
+| Answer rate/accuracy ниже порогов | Baseline H2-6 до H1-6; после M7 — 100 % и 73.9 % | См. [H2_6_GROUNDING_REPORT_2026-11-05.md](./H2_6_GROUNDING_REPORT_2026-11-05.md) |
+| Citation precision ниже 0.80 | M7: 0.621 — модель добавляет лишние цитаты (recall 0.848) | Сузить промпт цитирования; см. [MEASUREMENT_REPORT_2026-11-05.md](./MEASUREMENT_REPORT_2026-11-05.md) |
 | Метрики не воспроизводятся | Нет индекса/PDF/LM Studio | Нужны `outputs/astrology_test` и LM Studio; команды в HOW_TO_RUN §7.2 |
 | Предупреждение «ПЕРЕРАНК НЕ ВЫПОЛНЕН» | RU-CE не скачался/недоступен | Проверьте сеть; строгий режим — `HIPPORAG_REQUIRE_CROSSENCODER=1` |
 | Нужен чанковый baseline вместо page-level | H1-6 включает страницы | `ASTRO_RETRIEVER_PAGE_LEVEL=0` |

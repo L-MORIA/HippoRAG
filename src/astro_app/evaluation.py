@@ -880,8 +880,11 @@ def format_markdown_table(summaries: Sequence[Dict[str, Any]]) -> str:
 
     lines: List[str] = []
     if retrieval:
+        k = retrieval[0].get("k", 5)
+        mrr_k = retrieval[0].get("mrr_k", 10)
+        ndcg_k = retrieval[0].get("ndcg_k", 10)
         lines += [
-            "| Режим | n | recall@5 (док) | recall@5 (стр) | MRR@10 (док) | nDCG@10 | кеши <3 | p50, мс | p95, мс |",
+            f"| Режим | n | recall@{k} (док) | recall@{k} (стр) | MRR@{mrr_k} (док) | nDCG@{ndcg_k} | кеши <3 | p50, мс | p95, мс |",
             "|---|---|---|---|---|---|---|---|---|",
         ]
         for s in retrieval:

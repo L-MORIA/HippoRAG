@@ -98,9 +98,10 @@
 обещать невыверенную скорость.
 
 H1-6 добавил page-level путь (`search_bm25_hybrid_ru_pages`) и адаптер
-`scripts/grounding_astro_retriever.py`. Он пока не подключён к UI: сначала
-нужен реальный замер page recall@5. Чанковый baseline H2-6 остаётся доступен
-через `ASTRO_RETRIEVER_PAGE_LEVEL=0`.
+`scripts/grounding_astro_retriever.py`. Он прошёл приёмку в M7: **87.0 %**
+page recall@5 при цели 80 %. В UI пока не подключён — это следующий шаг.
+Чанковый baseline H2-6 остаётся доступен через
+`ASTRO_RETRIEVER_PAGE_LEVEL=0`.
 
 ## 5. Контракт заземления
 
@@ -179,6 +180,6 @@ H1-6 добавил page-level путь (`search_bm25_hybrid_ru_pages`) и ад�
 - H2-2: нет add/delete/reindex из UI, а также backup/restore и статуса индексации.
 - H2-3: нет Docker, Windows-установщика и one-command start.
 - H2-4: нет структурных логов, per-stage timings, метрик и дашборда.
-- H1-6: page-level retrieval реализован, но реальный page recall@5 ещё не снят.
-- H2-6: по baseline answer rate и accuracy ниже порогов; нужен перезамер после H1-6.
+- H1-6: page-level retrieval реализован и прошёл приёмку (M7: **87.0 %** page recall@5); в UI не подключён.
+- H2-6: после H1-6 7 из 8 метрик PASS; citation precision **0.621** < 0.80 — остаётся.
 - H2-1: приёмка с 5 внешними пользователями ещё не проведена.

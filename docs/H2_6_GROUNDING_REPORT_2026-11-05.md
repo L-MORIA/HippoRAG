@@ -3,6 +3,14 @@
 > **Связанные документы:** [DEEPSEEK_PLAN_2026-11-04.md](./DEEPSEEK_PLAN_2026-11-04.md) §5 (этап 0), §9 (DoD), [ROADMAP_REVISION_DEEPSEEK.md](./ROADMAP_REVISION_DEEPSEEK.md) §9.3 (H2-6), [PERFORMANCE.md](./PERFORMANCE.md), [H1_3_LATENCY_REPORT_2026-11-04.md](./H1_3_LATENCY_REPORT_2026-11-04.md)
 > **Дата:** 2026-11-05 · **Вопросов:** 36 (answerable 23, borderline 5, unanswerable 13)
 
+> **Обновление 2026-11-05 (M7, после H1-6).** Повторный прогон на том же
+> golden set с полным page-level путём: page recall@5 **87,0 %** (PASS ≥ 80 %),
+> answer rate **100 %**, accuracy **73,9 %**, abstention 92,3 %, false answer
+> 7,7 %, citation recall 0,848, marker validity 1,000, uncited 0 % — все PASS.
+> Не пройден только **citation precision 0,621** (< 0,80). Числа ниже в §3 —
+> исторический baseline до H1-6; перезамер — в
+> [MEASUREMENT_REPORT_2026-11-05.md](./MEASUREMENT_REPORT_2026-11-05.md).
+
 ## 1. Короткий итог
 
 Механика заземления работает: модель не выдумывает номера источников
@@ -171,10 +179,13 @@ python scripts/eval_grounding.py --run --retriever grounding_astro_retriever:ret
 
 ## 9. Что дальше
 
-1. **P1 (H1): поднять page recall@5 до ≥ 80 %.** Это единственный рычаг,
-   который двигает answer rate и accuracy. Кандидаты: page-level чанки или
-   parent-document retrieval, query expansion по терминам книги, обученный
-   RU-reranker поверх top-50.
+> **Статус на 2026-11-05:** п.1 выполнен — M7 дал page recall@5 **87,0 %**.
+> Answer rate и accuracy перезамерены: **100 %** и **73,9 %**. Остался
+> citation precision **0,621** — единственный непройденный порог.
+
+1. ~~**P1 (H1): поднять page recall@5 до ≥ 80 %.**~~ Выполнено в H1-6
+   (M7: 87,0 %). Дальше — citation precision: модель добавляет лишние
+   цитаты, хотя нужные источники находит (recall 0,848).
 2. Разметка `a18-meta-zodiac` и `a07-owen-zones` проверена по корпусу (§5.1) —
    менять не нужно; `gold_terms` и `gold_sources` подтверждены текстом книг.
    Набор замораживается: дальше его менять только при явной ошибке аннотации,

@@ -292,6 +292,11 @@ python scripts/eval_grounding.py --run `
 Если в предсказаниях нет `retrieved`, метрика считается не измеренной, и
 `--require-page-recall` возвращает код 2.
 
+Результат M7 на golden set (23 answerable): **page recall@5 87,0 %** — порог
+80 % пройден. M8 измерял 7 упрощённых ретриверов и дал максимум 73,9 %; это
+ablation, а не полный путь H1-6. Детали —
+[MEASUREMENT_REPORT_2026-11-05.md](./MEASUREMENT_REPORT_2026-11-05.md).
+
 Вернуться к чанковому baseline H2-6: `ASTRO_RETRIEVER_PAGE_LEVEL=0`.
 Остальные настройки: `ASTRO_RETRIEVER_RERANK_POOL` (50),
 `ASTRO_RETRIEVER_PAGE_MAX_CHARS` (4000). Детали — в
@@ -339,8 +344,9 @@ outputs/feedback/feedback.jsonl
 сохраняются: только вопрос, ответ, режим, оценка, комментарий и цитаты.
 Детали и ограничения — в [H2_1_WEB_UI_2026-11-05.md](./H2_1_WEB_UI_2026-11-05.md).
 
-> Режим 5 в UI — измеренный чанковый путь CLI. Page-level вариант H1-6 в UI
-> пока не подключён: сначала нужен реальный замер page recall@5.
+> Режим 5 в UI — измеренный чанковый путь CLI. Page-level вариант H1-6 прошёл
+> приёмку (M7: **87.0 %** page recall@5), но в UI пока не подключён — это
+> следующий шаг.
 
 ## 8. Тесты
 

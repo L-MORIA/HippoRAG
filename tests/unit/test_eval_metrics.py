@@ -511,6 +511,18 @@ def test_format_markdown_table_has_headers_and_rows():
     assert "| 10 Резюме |" in table
 
 
+def test_format_markdown_table_uses_actual_k():
+    """Заголовок не должен врать: при k=10 пишем recall@10, а не recall@5."""
+    retrieval = ev.summarize_mode(
+        [row()], mode_id="5", label="BM25+CE-ru", k=10, mrr_k=10, ndcg_k=10
+    )
+    table = ev.format_markdown_table([retrieval])
+
+    assert "recall@10 (док)" in table
+    assert "recall@10 (стр)" in table
+    assert "recall@5" not in table
+
+
 # ── Согласованность со реестром режимов ──────────────────────────────────────
 
 

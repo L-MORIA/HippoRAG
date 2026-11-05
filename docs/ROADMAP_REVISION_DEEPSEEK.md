@@ -2216,14 +2216,18 @@ baseline зафиксирован; для LLM-режимов есть отдел
 
 **Оценка:** 2–4 дня, включая перезамер.
 
-> **🟡 Реализация 2026-11-05; замер ожидает индекс и LM Studio.**
+> **✅ Реализация и приёмка 2026-11-05.**
 > Page-level ретрив (`src/astro_app/page_retrieval.py`) и page recall@k с
 > порогом 80 % (`scripts/eval_grounding.py --require-page-recall`) готовы,
 > unit-тесты — 420 passed, 1 skipped. Адаптер по умолчанию отдаёт страницы;
-> чанковый baseline H2-6 — `ASTRO_RETRIEVER_PAGE_LEVEL=0`. Реальный
-> page recall@5 **не снят**: в рабочей копии нет `outputs/astrology_test` и
-> запущенного LM Studio, поэтому приёмка пока не подтверждена. Детали и
-> команды — [H1_6_PAGE_RETRIEVAL_2026-11-05.md](./H1_6_PAGE_RETRIEVAL_2026-11-05.md).
+> чанковый baseline H2-6 — `ASTRO_RETRIEVER_PAGE_LEVEL=0`.
+>
+> M7 (полный page-level путь, 23 answerable): **page recall@5 87.0 %**,
+> answer rate 100 %, accuracy 73.9 %, citation recall 0.848 — цель H1-6
+> достигнута. M8 (7 упрощённых ретриверов) даёт максимум 73.9 %, но это
+> ablation, а не потолок полного пути: разница — keyword-boost в
+> `page_retrieval.py`. Остался citation precision 0.621 < 0.80 (H2-6).
+> Детали — [MEASUREMENT_REPORT_2026-11-05.md](./MEASUREMENT_REPORT_2026-11-05.md).
 
 ---
 
@@ -2323,8 +2327,8 @@ baseline зафиксирован; для LLM-режимов есть отдел
 
 **Оценка:** 2,5–3 дня.
 
-> **Состояние (2026-11-05): принято как контракт заземления, три DoD-пункта
-> заблокированы ретривом.**
+> **Состояние (2026-11-05): контракт заземления принят; после H1-6 семь из
+> восьми метрик проходят, остался citation precision.**
 >
 > Реализовано: единый контракт `ОТВЕТ / ИСТОЧНИКИ / ОТКАЗ`, парсер `[n]`,
 > общий `answer_grounded` для режимов 12/19/21, `/search` с `abstained` и
@@ -2345,8 +2349,13 @@ baseline зафиксирован; для LLM-режимов есть отдел
 > `qa_top_k` оставлен 5: на 8 ложные ответы HippoRAG удваиваются, accuracy
 > режима 5 падает 56,5 % → 52,2 %.
 >
-> Продолжение — задача H1-6 в [ROADMAP_REVISION_DEEPSEEK.md](./ROADMAP_REVISION_DEEPSEEK.md)
-> (page recall@5 ≥ 80 %), после него answer rate и accuracy перемеряются.
+> **Перезамер после H1-6 (M7, 2026-11-05 19:09):** page recall@5 **87,0 %**,
+> answer rate **100 %**, accuracy **73,9 %**, abstention 92,3 %, false answer
+> 7,7 %, citation recall 0,848, marker validity 1,000, uncited 0 % — PASS.
+> Не пройден только **citation precision 0,621** (< 0,80).
+>
+> H1-6 выполнена (M7: 87,0 %); следующий шаг — поднять citation precision и
+> подключить page-level путь к Web UI.
 
 ---
 
@@ -2431,20 +2440,24 @@ H0-1…H0-8 закрыты (`91e4f0e`, `538e59f`, `766f189`, `4fdaa85`, `c73eb92
 | `pytest tests/unit -m unit` | ✅ **212 функций / 221 кейс**, CI-подтверждено (`41699840455`) | 0 failed / 0 errors | CI |
 | CI на push | ✅ 6 job'ов, все зелёные, ~20 мин | ✅, ≤ 20 мин | GitHub Actions |
 | Расход CI-минут | матрица 2 OS + 2 smoke + eval-smoke, `concurrency` с отменой старых прогонов | ≤ 500 мин/мес | GitHub billing |
-| Recall@10 | не измерен отдельно; измерен **recall@5 (документы) = 97.5 %** (режим 1, 40 вопросов) | ≥ 0,85 | eval-скрипт |
-| MRR@10 | **0.921** (режим 1, 40 вопросов) | ≥ 0,65 | eval-скрипт |
-| nDCG@10 | **0.935** (режим 1, 40 вопросов) | ≥ 0,70 | eval-скрипт |
+| Recall@10 | **97.5 % (документы, режимы 2 и 5)**; страницы 72.5 % / 75.0 % (40 вопросов, 2026-11-05) | ≥ 0,85 (документы) | eval-скрипт |
+| Page recall@5 (golden set) | **87.0 %** (M7, полный H1-6-путь, 23 answerable); M8 ablation — 73.9 % | ≥ 0,80 | `eval_grounding.py` / `measure_page_ceiling.py` |
+| Citation precision | **0.621** (M7, 23 answerable, 2026-11-05) | ≥ 0,80 | `eval_grounding.py` |
+| Answer rate (golden set) | **100 %** (M7, 23 answerable, 2026-11-05) | ≥ 90 % | `eval_grounding.py` |
+| Answer accuracy (golden set) | **73.9 %** (M7, 23 answerable, 2026-11-05) | ≥ 70 % | `eval_grounding.py` |
+| MRR@10 | **0.921** (режим 1); 0.912 (режим 2), 0.902 (режим 5) — 40 вопросов | ≥ 0,65 | eval-скрипт |
+| nDCG@10 | **0.935** (режим 1); 0.928 (режим 2), 0.921 (режим 5) — 40 вопросов | ≥ 0,70 | eval-скрипт |
 | Answer correctness | 129/152 (smoke) | ≥ 0,80 | ручная разметка; LLM-judge — только после сходимости ≥ 0,8 |
 | Пустые ответы на eval | 0 после фиксов | 0 | eval-скрипт |
-| Доля ответов без цитаты | не измерена | 0 | H2-6 |
+| Доля ответов без цитаты | отдельно не измерена; M7: marker validity 1.000, uncited sentence 0 % | 0 | H2-6 |
 | Факты one-shot вне корпуса | 2 (по проверке Mavis) | 0 | скрипт-проверка H2-6 |
-| `citations[].sources` | не проверено | все источники чанка | тест на чанке с двумя PDF (Mavis, П-2) |
+| `citations[].sources` | ✅ оба PDF в цитате (`test_same_text_different_documents_keep_metadata`, 2026-11-05) | все источники чанка | тест на чанке с двумя PDF (Mavis, П-2) |
 | p95 default | ~1–2 с (граф) | ≤ 10 с | замеры |
 | p95 LLM-режимов | 97 с (режим 18) | ≤ 30 с | замеры |
 | Загрузка индекса | 7,4 с | ≤ 10 с | лог |
 | Индексация 3 PDF | ~6 ч | ≤ 2 ч | лог |
 | Битые ссылки в docs | ≥ 3 | 0 | `check_docs_links.py` |
-| Покрытие тестами `src/hipporag` | неизвестно | ≥ 40 % | pytest-cov |
+| Покрытие тестами `src/hipporag` | **40 %** (1928 / 4813, 2026-11-05) | ≥ 40 % | pytest-cov |
 | Время установки на чистую машину | неизвестно | ≤ 15 мин | H2-3 |
 
 ### 10.2. Как не обмануть себя
