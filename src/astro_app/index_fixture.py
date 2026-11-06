@@ -54,6 +54,20 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _write_json(path: Path, payload: Any) -> None:
+    """Записать JSON с переводами строк ``\\n`` на любой платформе.
+
+    Это не косметика: ``manifest.json`` хранит sha256 файла фикстуры, а
+    ``Path.write_text`` в текстовом режиме на Windows пишет CRLF. Если байты
+    зависят от ОС, хеш, посчитанный на машине владельца, не совпадёт с хешем
+    файла, выданного git при checkout в CI (там LF) — джоб упадёт на ровном
+    месте. Поэтому кодировка и переводы строк задаются явно.
+    """
+    text = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+
+
 def save_fixture(
     chunks: Sequence[Dict[str, Any]],
     out_dir: Path,
@@ -84,9 +98,7 @@ def save_fixture(
         ],
     }
     fixture_path = out_dir / FIXTURE_FILE
-    fixture_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
-    )
+    _write_json(fixture_path, payload)
 
     manifest = {
         "version": FIXTURE_VERSION,
@@ -94,9 +106,7 @@ def save_fixture(
         "n_chunks": len(chunks),
         "files": {FIXTURE_FILE: sha256_file(fixture_path)},
     }
-    (out_dir / MANIFEST_FILE).write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
-    )
+    _write_json(out_dir / MANIFEST_FILE, manifest)
     return manifest
 
 

@@ -123,35 +123,44 @@ jobs:
         python -m pip install --upgrade pip
         pip install -e ".[dev]"
 
-    - name: Detect index fixture
-      id: fixture
-      run: |
-        if [ -f fixtures/astrology_mini/fixture.json ]; then
-          echo "present=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "present=false" >> "$GITHUB_OUTPUT"
-          echo "::notice::Индекс-фикстура не в репозитории: сборка за владельцем (scripts/build_index_fixture.py). Джоб публикует отчёт-заглушку, а не результат retrieval."
-        fi
+    - name: Synthetic fixture matches its generator (byte-for-byte)
+      run: python scripts/make_synthetic_fixture.py --check
 
-    - name: BM25 smoke over fixture (no LLM, no models)
-      if: steps.fixture.outputs.present == 'true'
+    - name: BM25 smoke over synthetic fixture (no LLM, no models)
+      run: |
+        python scripts/index_fixture_smoke.py \
+          --fixture fixtures/synthetic_mini \
+          --dataset fixtures/synthetic_mini/questions.jsonl \
+          --limit 0 \
+          --top-k 5 \
+          --min-recall 0.9 \
+          --out outputs/reports/fixture_smoke.json \
+          --markdown-out outputs/reports/fixture_smoke.md
+
+    # Реальная фикстура — данные владельца (текст корпуса), поэтому её нет в
+    # репозитории. Если владелец когда-нибудь её закоммитит, шаг подхватит её сам.
+    - name: BM25 smoke over owner's real fixture (if committed)
+      if: ${{ hashFiles('fixtures/astrology_mini/fixture.json') != '' }}
       run: |
         python scripts/index_fixture_smoke.py \
           --fixture fixtures/astrology_mini \
           --limit 10 \
           --top-k 5 \
-          --out outputs/reports/fixture_smoke.json \
-          --markdown-out outputs/reports/fixture_smoke.md
+          --out outputs/reports/fixture_smoke_real.json \
+          --markdown-out outputs/reports/fixture_smoke_real.md
 
-    - name: Publish fixture and smoke report as artifact
+    # В артефакт идут только отчёты (метаданные: qid, файл, позиция). Текст
+    # чанков не публикуется ни при каком варианте фикстуры.
+    - name: Publish smoke reports
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: index-fixture-and-smoke-report
+        name: fixture-smoke-report
         path: |
-          fixtures/astrology_mini
           outputs/reports/fixture_smoke.json
           outputs/reports/fixture_smoke.md
+          outputs/reports/fixture_smoke_real.json
+          outputs/reports/fixture_smoke_real.md
         if-no-files-found: warn
         retention-days: 30
 
