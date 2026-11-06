@@ -52,10 +52,11 @@ def test_dockerfile_copies_runtime_sources():
     text = read("Dockerfile")
 
     for fragment in (
-        "COPY pyproject.toml README_RU.md .env.example ./",
+        "COPY pyproject.toml README_RU.md .env.example constraints.txt ./",
         "COPY src ./src",
         "COPY scripts ./scripts",
         "COPY main.py ./",
+        "pip install . -c constraints.txt",
     ):
         assert fragment in text
 

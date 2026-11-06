@@ -1,0 +1,11 @@
+# Build-константы для Docker-образа (H2-3).
+#
+# pyproject задаёт только нижние границы, и резолвер pip при `pip install .`
+# берёт последние версии. Связка "последняя transformers + torch 2.5.1" сломана:
+# NameError: name 'nn' is not defined (transformers/distributed/pipeline_parallel.py)
+# — crash-loop при старте контейнера (приёмка H2-3, 06.11.2026).
+#
+# Пиним ровно тот стек, на котором проект собран и проверен
+# (host-venv, CI, все юнит-тесты).
+transformers==4.45.2
+sentence-transformers==5.7.0

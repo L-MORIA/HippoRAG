@@ -26,12 +26,14 @@ RUN python -m pip install --upgrade pip \
     && python -m pip install --index-url https://download.pytorch.org/whl/cpu \
         "torch==${TORCH_VERSION}"
 
-COPY pyproject.toml README_RU.md .env.example ./
+COPY pyproject.toml README_RU.md .env.example constraints.txt ./
 COPY src ./src
 COPY scripts ./scripts
 COPY main.py ./
 
-RUN python -m pip install .
+# -c constraints.txt: пиним проверенный стек (transformers/sentence-transformers),
+# иначе резолвер берёт последние версии, несовместимые с torch 2.5.1 (см. файл).
+RUN python -m pip install . -c constraints.txt
 
 RUN useradd --create-home --uid 10001 appuser \
     && mkdir -p /app/outputs /app/data /app/temp_uploads /app/cache \
