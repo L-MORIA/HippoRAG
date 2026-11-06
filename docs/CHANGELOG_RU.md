@@ -1,5 +1,37 @@
 # История изменений HippoRAG
 
+## 2026-11-06 — H2-2: диагностика нулевых чанков при переиндексации
+
+### Исправлено
+- `IndexLifecycle.reindex` после индексации считает чанки по каждому
+  `source_file` и возвращает `zero_chunk_files`, `warnings`,
+  `chunk_counts` и `chunks_added`; при нуле чанков — `status="warning"`.
+- Предупреждение пишется в лог и сохраняется в `OperationState.detail`,
+  поэтому доступно в `GET /index/status`.
+- `/index/reindex` и `/upload-and-ingest` поддерживают `?sync=true`:
+  ответ сразу содержит `status=success|warning`, `warnings` и
+  `zero_chunk_files`.
+- Фоновые ответы этих маршрутов теперь `status="accepted"`, а не
+  `success`: до окончания индексации результат неизвестен.
+- Очистка `temp_uploads/` перенесена в `finally` и выполняется также при
+  ошибке индексации.
+
+### Тесты
+- `tests/unit/test_index_lifecycle.py` — 3 новых теста: нулевой PDF,
+  смешанный набор, замена существующего документа.
+- `tests/unit/test_search_api_index.py` — 3 новых теста: sync warning,
+  sync success, upload sync warning; фоновый ответ проверяется как
+  `accepted`.
+- `pytest tests/unit/test_index_lifecycle.py tests/unit/test_search_api_index.py -q`
+  — **29 passed**.
+- `pytest tests/unit -q` — **530 passed, 1 skipped**.
+
+### Документация
+- `docs/H2_2_DATA_LIFECYCLE_2026-11-05.md` — контракт warning,
+  `?sync=true`, ограничение с ручным restore.
+- `docs/ROADMAP_REVISION_DEEPSEEK.md` — хвост H2-2 закрыт.
+- `docs/ADMIN_GUIDE.md` — примеры и поведение API.
+
 ## 2026-11-06 — H2-3: упаковка, one-command start и Docker CPU-only
 
 ### Добавлено
@@ -150,10 +182,10 @@
 - Приёмка H2-2 из ROADMAP закрыта.
 
 ### Находка
-- `reindex`/`upload-and-ingest` при 0 извлечённых чанков возвращают успех
+- `reindex`/`upload-and-ingest` при 0 извлечённых чанков возвращали успех
   без предупреждения (тихий no-op, обнаружено на первой попытке с короткой
-  страницей). Рекомендация — явная диагностика в ответе API; записана в
-  `H2_2_DATA_LIFECYCLE_2026-11-05.md` §5.
+  страницей). **Исправлено 2026-11-06** — см. запись выше; диагностика
+  добавлена в ответ API и `/index/status`.
 
 ### Артефакты
 - `scripts/make_h2_2_test_pdf.py` — генератор 1-страничного тестового PDF

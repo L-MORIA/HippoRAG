@@ -78,10 +78,19 @@ API, а `/upload-and-ingest` делает бэкап и переиндексац
 3. Старые чанки этих же `source_file` удаляются (кроме общих).
 4. Вызывается `HippoRAG.index_pdfs`.
 5. Обновляется `index_manifest.json`.
+6. Считаются чанки по каждому источнику; если у файла их 0, операция
+   получает `status="warning"`, а в результат попадают `zero_chunk_files`,
+   `warnings`, `chunk_counts` и `chunks_added`.
 
 `/upload-and-ingest` сохраняет файл под исходным basename в
 `temp_uploads/` и вызывает тот же `reindex` в фоне, поэтому повторная
 загрузка не оставляет дубликатов.
+
+По умолчанию `/index/reindex` и `/upload-and-ingest` выполняются в фоне и
+сразу возвращают `status="accepted"`. Итог и предупреждения доступны в
+`GET /index/status` (поле `detail`). Для немедленного ответа добавлен
+режим `?sync=true`: он ждёт окончания и возвращает `status="success"` или
+`status="warning"` вместе с `detail.zero_chunk_files` и `detail.warnings`.
 
 ## 3. Проверка
 
@@ -90,7 +99,7 @@ $env:PYTHONIOENCODING="utf-8"
 .\.venv\Scripts\python.exe -m pytest tests/unit/test_index_lifecycle.py tests/unit/test_search_api_index.py -q
 ```
 
-Ожидаемо: **21 passed**.
+Ожидаемо: **29 passed**.
 
 Полный unit-набор:
 
@@ -98,7 +107,7 @@ $env:PYTHONIOENCODING="utf-8"
 .\.venv\Scripts\python.exe -m pytest tests/unit -m unit -q
 ```
 
-Ожидаемо: **457 passed, 1 skipped** (2026-11-05).
+Ожидаемо: **530 passed, 1 skipped** (2026-11-06, Python 3.11.9).
 
 ## 4. Живая приёмка
 
@@ -143,7 +152,16 @@ inline `API_KEY` (fail-closed подтвердился: без ключа сер
 манифест перезаписан без изменений, API вернул `success`. Рекомендация:
 `reindex`/`upload-and-ingest` должны возвращать предупреждение (или не-2xx),
 когда из файла извлечено 0 чанков, иначе тихий no-op выглядит как успех.
-Зафиксировано в §5 как ограничение первой версии.
+Зафиксировано в §5 как ограничение первой версии (снято 2026-11-06).
+
+**Исправлено 2026-11-06.** `reindex` считает чанки по каждому источнику
+после индексации. Если у файла их 0, результат получает
+`status="warning"`, `zero_chunk_files`, `warnings`, `chunk_counts` и
+`chunks_added`; предупреждение пишется в лог и сохраняется в
+`OperationState.detail`, поэтому видно в `GET /index/status`. В режиме
+`?sync=true` тот же warning возвращается сразу в ответе API. Фоновые
+`/index/reindex` и `/upload-and-ingest` больше не отвечают `success` до
+окончания индексации — они возвращают `accepted`.
 
 После приёмки сервер остановлен, `temp_uploads/` удалён; в
 `outputs/astrology_test/backups/` остались три копии (приёмочная и две
@@ -155,9 +173,10 @@ inline `API_KEY` (fail-closed подтвердился: без ключа сер
   Swagger (`/docs`). Это первая версия H2-2.
 - Автоматической ротации бэкапов нет; `llm_cache/` входит в архив, поэтому
   копии могут быть большими.
-- `reindex`/`upload-and-ingest` при 0 извлечённых чанков завершаются
-  «успехом» без предупреждения в ответе (находка живой приёмки §4.1);
-  сервер пишет WARNING в лог. Требуется явная диагностика в ответе API.
+- Если PDF не дал ни одного чанка, старые чанки этого источника уже
+  удалены (бэкап `before-reindex` создан до операции). API возвращает
+  `warning`, но автоматического отката нет — восстанавливайте из бэкапа
+  вручную.
 - Удаление документа не пересчитывает граф заново: удаляются чанки и
   связанные с ними сущности/факты силами `HippoRAG.delete`; общие чанки
   сохраняются.

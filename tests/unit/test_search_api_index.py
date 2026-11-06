@@ -14,6 +14,7 @@ class FakeLifecycle:
     def __init__(self):
         self.backup_label = None
         self.reindexed = []
+        self.reindex_result = None
 
     def status(self):
         return {
@@ -71,6 +72,8 @@ class FakeLifecycle:
 
     def reindex(self, pdf_paths):
         self.reindexed.append(list(pdf_paths))
+        if self.reindex_result is not None:
+            return dict(self.reindex_result)
         return {"pdf_paths": list(pdf_paths), "backup": {"name": "before.zip"}}
 
 
@@ -136,8 +139,43 @@ def test_index_reindex_route_accepts_existing_pdf(client, tmp_path):
 
     response = http.post("/index/reindex", json={"pdf_paths": [str(pdf)]})
     assert response.status_code == 200
-    assert response.json()["status"] == "accepted"
+    body = response.json()
+    assert body["status"] == "accepted"
+    assert "/index/status" in body["message"]
     assert lifecycle.reindexed == [[str(pdf)]]
+
+
+def test_index_reindex_sync_returns_warning_for_zero_chunks(client, tmp_path):
+    http, lifecycle = client
+    pdf = tmp_path / "empty.pdf"
+    pdf.write_bytes(b"%PDF-1.4 test")
+    lifecycle.reindex_result = {
+        "status": "warning",
+        "pdf_paths": [str(pdf)],
+        "zero_chunk_files": ["empty.pdf"],
+        "warnings": ["Из файла 'empty.pdf' не извлечено ни одного чанка"],
+        "backup": {"name": "before.zip"},
+    }
+
+    response = http.post("/index/reindex?sync=true", json={"pdf_paths": [str(pdf)]})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "warning"
+    assert "предупреждениями" in body["message"]
+    assert body["detail"]["zero_chunk_files"] == ["empty.pdf"]
+    assert lifecycle.reindexed == [[str(pdf)]]
+
+
+def test_index_reindex_sync_returns_success_without_warnings(client, tmp_path):
+    http, _ = client
+    pdf = tmp_path / "a.pdf"
+    pdf.write_bytes(b"%PDF-1.4 test")
+
+    response = http.post("/index/reindex?sync=true", json={"pdf_paths": [str(pdf)]})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
 
 
 def test_index_reindex_route_rejects_missing_pdf(client, tmp_path):
@@ -169,6 +207,33 @@ def test_upload_and_ingest_uses_lifecycle_reindex(client, monkeypatch, tmp_path)
     )
 
     assert response.status_code == 200
-    assert response.json()["processed_files"] == 1
+    body = response.json()
+    assert body["status"] == "accepted"
+    assert body["processed_files"] == 1
+    assert body["warnings"] == []
+    assert lifecycle.reindexed == [[str(Path("temp_uploads") / "a.pdf")]]
+    assert not (tmp_path / "temp_uploads").exists()
+
+
+def test_upload_and_ingest_sync_returns_warning_for_zero_chunks(client, monkeypatch, tmp_path):
+    http, lifecycle = client
+    monkeypatch.setattr(srv, "hipporag", object())
+    monkeypatch.chdir(tmp_path)
+    lifecycle.reindex_result = {
+        "status": "warning",
+        "zero_chunk_files": ["a.pdf"],
+        "warnings": ["Из файла 'a.pdf' не извлечено ни одного чанка"],
+    }
+
+    response = http.post(
+        "/upload-and-ingest?sync=true",
+        files={"files": ("a.pdf", b"%PDF-1.4 test", "application/pdf")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "warning"
+    assert body["zero_chunk_files"] == ["a.pdf"]
+    assert body["warnings"]
     assert lifecycle.reindexed == [[str(Path("temp_uploads") / "a.pdf")]]
     assert not (tmp_path / "temp_uploads").exists()

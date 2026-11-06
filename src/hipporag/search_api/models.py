@@ -175,7 +175,7 @@ class ReindexRequest(BaseModel):
 
 
 class ReindexResponse(BaseModel):
-    status: str = Field(default="accepted", description="Статус запуска")
+    status: str = Field(default="accepted", description="Статус: accepted, success или warning")
     message: str = Field(..., description="Пояснение")
     detail: Dict[str, Any] = Field(default_factory=dict)
 

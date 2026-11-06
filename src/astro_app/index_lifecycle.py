@@ -495,16 +495,42 @@ class IndexLifecycle:
                 deleted = self._delete_locked(sources)
                 hipporag.index_pdfs(paths)
                 after = self._count_store(hipporag, "chunk_embedding_store")
+                chunk_counts = self._chunk_counts_by_source(hipporag, sources)
+                zero_chunk_files = sorted(
+                    name for name, count in chunk_counts.items() if count == 0
+                )
+                deleted_chunks = int(deleted.get("deleted_chunks", 0) or 0)
+                chunks_added = after - before + deleted_chunks
+                warnings: List[str] = []
+                if zero_chunk_files:
+                    backup_name = backup.get("name") if isinstance(backup, dict) else None
+                    for name in zero_chunk_files:
+                        warning = (
+                            f"Из файла {name!r} не извлечено ни одного чанка — "
+                            "после переиндексации его нет в индексе."
+                        )
+                        if backup_name:
+                            warning += f" Копия индекса до операции: {backup_name}."
+                        warnings.append(warning)
+                    logger.warning(
+                        "reindex: 0 чанков извлечено из файлов: %s",
+                        ", ".join(zero_chunk_files),
+                    )
                 self._write_manifest(hipporag)
                 # В store добавились чанки: сбрасываем кэш page-индекса,
                 # иначе page-level выдача не увидит новые страницы.
                 _reset_page_cache()
                 result = {
+                    "status": "warning" if zero_chunk_files else "success",
                     "backup": backup,
                     "deleted": deleted,
                     "pdf_paths": paths,
                     "chunks_before": before,
                     "chunks_after": after,
+                    "chunks_added": chunks_added,
+                    "chunk_counts": chunk_counts,
+                    "zero_chunk_files": zero_chunk_files,
+                    "warnings": warnings,
                 }
                 self._finish(detail=result)
                 return result
@@ -548,6 +574,27 @@ class IndexLifecycle:
         for hash_id in store.get_all_ids():
             rows[hash_id] = store.get_row(hash_id)
         return rows
+
+    def _chunk_counts_by_source(self, hipporag: Any, targets: Set[str]) -> Dict[str, int]:
+        """Сколько чанков в store относится к каждому целевому источнику.
+
+        После ``reindex`` старые чанки источников уже удалены, поэтому ноль
+        означает, что парсер не извлёк ни одного чанка (или индексация файла
+        не удалась). Один чанк считается один раз на источник, даже если в
+        metadata несколько записей этого же файла.
+        """
+        counts = {name: 0 for name in targets}
+        store = getattr(hipporag, "chunk_embedding_store", None)
+        if store is None:
+            return {name: counts[name] for name in sorted(counts)}
+        for row in self._all_rows(store).values():
+            seen: Set[str] = set()
+            for entry in _metadata_entries(row.get("metadata")):
+                name = _source_name(entry.get("source_file"))
+                if name in targets and name not in seen:
+                    counts[name] += 1
+                    seen.add(name)
+        return {name: counts[name] for name in sorted(counts)}
 
     def _chunk_texts_for_sources(
         self, hipporag: Any, targets: Set[str]

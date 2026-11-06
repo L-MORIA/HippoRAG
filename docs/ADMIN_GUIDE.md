@@ -176,9 +176,29 @@ curl -X POST http://127.0.0.1:8000/index/reindex \
 документов, удаляется только metadata-запись переиндексируемого источника,
 а сам чанк остаётся.
 
+По умолчанию переиндексация идёт в фоне: ответ содержит
+`status="accepted"`, а итог и предупреждения — в `GET /index/status`
+(поле `detail`). Если из PDF не извлечено ни одного чанка, итог получает
+`status="warning"`, а в `detail` появляются `zero_chunk_files`, `warnings`,
+`chunk_counts` и `chunks_added`. Чтобы получить этот результат сразу,
+добавьте `?sync=true`:
+
+```bash
+curl -X POST "http://127.0.0.1:8000/index/reindex?sync=true" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"pdf_paths": ["data/pdfs/new.pdf"]}'
+```
+
+При нуле чанков старые чанки этого документа уже удалены; бэкап
+`before-reindex` создан до операции, поэтому индекс можно восстановить
+через `POST /index/restore`.
+
 **Через загрузку файла:** `POST /upload-and-ingest` сохраняет PDF в
 `temp_uploads/` и запускает ту же переиндексацию в фоне — с бэкапом и
-статусом. Это основной путь «загрузил PDF → индекс обновился».
+статусом. Это основной путь «загрузил PDF → индекс обновился». Для
+немедленного результата также поддерживается `?sync=true`; ответ тогда
+содержит `status`, `warnings` и `zero_chunk_files`.
 
 **Наблюдение:**
 
@@ -235,14 +255,14 @@ X-API-Key: ваш-секретный-ключ
 | `GET /health` | Статус, число чанков/фактов, `auth_failures` | `X-API-Key` |
 | `POST /search` | Поиск через `HippoRAG.rag_qa` | `X-API-Key` |
 | `POST /ingest` | Индексация PDF по путям | `X-API-Key` |
-| `POST /upload-and-ingest` | Загрузка PDF и индексация с бэкапом | `X-API-Key` |
+| `POST /upload-and-ingest` | Загрузка PDF и индексация с бэкапом (`?sync=true` — ждать результата) | `X-API-Key` |
 | `GET /index/status` | Статус индекса и операции | `X-API-Key` |
 | `GET /index/documents` | Документы в индексе | `X-API-Key` |
 | `POST /index/backup` | Создать бэкап | `X-API-Key` |
 | `GET /index/backups` | Список бэкапов | `X-API-Key` |
 | `POST /index/restore` | Восстановить из бэкапа | `X-API-Key` |
 | `POST /index/delete` | Удалить документы по `source_file` | `X-API-Key` |
-| `POST /index/reindex` | Переиндексировать PDF по путям | `X-API-Key` |
+| `POST /index/reindex` | Переиндексировать PDF по путям (`?sync=true` — ждать результата) | `X-API-Key` |
 | `GET /docs` | Swagger UI | `X-API-Key` |
 | `GET /` , `GET /ui/*` | Статика Web UI | без ключа |
 | `POST /api/ask` | Вопрос из Web UI | `X-API-Key` |

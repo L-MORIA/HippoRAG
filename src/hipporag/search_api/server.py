@@ -338,9 +338,17 @@ async def index_delete(request: DeleteDocumentsRequest) -> DeleteDocumentsRespon
 
 @app.post("/index/reindex", response_model=ReindexResponse, tags=["index"])
 async def index_reindex(
-    request: ReindexRequest, background_tasks: BackgroundTasks = None
+    request: ReindexRequest,
+    sync: bool = False,
+    background_tasks: BackgroundTasks = None,
 ) -> ReindexResponse:
-    """Переиндексировать PDF в фоне, предварительно сделав бэкап (H2-2)."""
+    """Переиндексировать PDF, предварительно сделав бэкап (H2-2).
+
+    По умолчанию операция выполняется в фоне, а её результат и
+    предупреждения доступны через ``GET /index/status``. С ``?sync=true``
+    запрос ждёт окончания и сразу возвращает ``status=warning``, если из
+    какого-то PDF не извлечено ни одного чанка.
+    """
     lifecycle = _require_index_lifecycle()
     if lifecycle.status().get("state") == "running":
         raise HTTPException(status_code=409, detail="Операция с индексом уже выполняется")
@@ -349,20 +357,32 @@ async def index_reindex(
     if missing:
         raise HTTPException(status_code=400, detail="Файлы не найдены: " + ", ".join(missing))
 
-    detail = {"pdf_paths": request.pdf_paths}
-    if background_tasks is not None:
+    if not sync and background_tasks is not None:
         background_tasks.add_task(lifecycle.reindex, request.pdf_paths)
-        message = "Переиндексация запущена в фоновом режиме"
-    else:
-        try:
-            detail = lifecycle.reindex(request.pdf_paths)
-        except (FileNotFoundError, ValueError) as error:
-            raise HTTPException(status_code=400, detail=str(error)) from error
-        except RuntimeError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
-        message = "Переиндексация завершена"
+        return ReindexResponse(
+            status="accepted",
+            message=(
+                "Переиндексация запущена в фоновом режиме; результат и "
+                "предупреждения — в GET /index/status"
+            ),
+            detail={"pdf_paths": request.pdf_paths},
+        )
 
-    return ReindexResponse(status="accepted", message=message, detail=detail)
+    try:
+        detail = lifecycle.reindex(request.pdf_paths)
+    except (FileNotFoundError, ValueError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+    warnings = list(detail.get("warnings") or [])
+    status = detail.get("status")
+    if status not in ("success", "warning"):
+        status = "warning" if warnings else "success"
+    message = "Переиндексация завершена"
+    if warnings:
+        message += f" с предупреждениями ({len(warnings)})"
+    return ReindexResponse(status=status, message=message, detail=detail)
 
 
 @app.post("/search", response_model=SearchResponse)
@@ -497,9 +517,17 @@ async def ingest_documents(request: IngestRequest):
 
 @app.post("/upload-and-ingest")
 async def upload_and_ingest(
-    files: List[UploadFile] = File(...), background_tasks: BackgroundTasks = None
+    files: List[UploadFile] = File(...),
+    sync: bool = False,
+    background_tasks: BackgroundTasks = None,
 ):
-    """Загрузка и индексация PDF-файлов."""
+    """Загрузка и индексация PDF-файлов.
+
+    По умолчанию индексация идёт в фоне; её результат и предупреждения
+    доступны через ``GET /index/status``. С ``?sync=true`` запрос ждёт
+    окончания и возвращает ``status=warning``, если из файла не извлечено
+    ни одного чанка.
+    """
     if hipporag is None:
         raise HTTPException(status_code=500, detail="Система не инициализирована")
 
@@ -537,38 +565,63 @@ async def upload_and_ingest(
     if not saved_files and files:
         raise HTTPException(status_code=400, detail="Не удалось сохранить ни один файл")
 
-    # Индексация в фоне. Через lifecycle — с бэкапом и статусом (H2-2).
-    def index_task():
+    # Индексация через lifecycle — с бэкапом, статусом и диагностикой (H2-2).
+    def index_task() -> dict:
         try:
             if index_lifecycle is not None:
-                index_lifecycle.reindex(saved_files)
-            else:
-                hipporag.index_pdfs(saved_files)
-            # Очистка временных файлов после индексации
+                return index_lifecycle.reindex(saved_files)
+            hipporag.index_pdfs(saved_files)
+            return {}
+        except Exception as error:
+            logger.error("Ошибка индексации загруженных файлов: %s", error)
+            raise
+        finally:
+            # Очистка временных файлов после индексации, в том числе при ошибке.
             for file_path in saved_files:
                 try:
                     os.remove(file_path)
-                except Exception as e:
-                    logger.warning(f"Не удалось удалить временный файл {file_path}: {e}")
+                except Exception as error:
+                    logger.warning("Не удалось удалить временный файл %s: %s", file_path, error)
             try:
                 upload_dir.rmdir()
             except OSError:
                 logger.warning("Каталог temp_uploads не пуст — оставлен на месте")
-        except Exception as e:
-            logger.error(f"Ошибка фоновой индексации: {str(e)}")
 
-    if background_tasks:
+    if not sync and background_tasks:
         background_tasks.add_task(index_task)
-        message = "Файлы загружены и индексация запущена в фоновом режиме"
-    else:
-        index_task()
-        message = "Файлы загружены и проиндексированы"
+        return {
+            "status": "accepted",
+            "message": (
+                "Файлы загружены, индексация запущена в фоновом режиме; "
+                "результат и предупреждения — в GET /index/status"
+            ),
+            "processed_files": len(saved_files),
+            "failed_files": len(failed_files),
+            "warnings": [],
+            "zero_chunk_files": [],
+        }
 
+    try:
+        result = index_task()
+    except (FileNotFoundError, ValueError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    warnings = list(result.get("warnings") or [])
+    zero_chunk_files = list(result.get("zero_chunk_files") or [])
+    status = result.get("status")
+    if status not in ("success", "warning"):
+        status = "warning" if warnings else "success"
+    message = "Файлы загружены и проиндексированы"
+    if warnings:
+        message += f" с предупреждениями ({len(warnings)})"
     return {
-        "status": "success",
+        "status": status,
         "message": message,
         "processed_files": len(saved_files),
         "failed_files": len(failed_files),
+        "warnings": warnings,
+        "zero_chunk_files": zero_chunk_files,
     }
 
 

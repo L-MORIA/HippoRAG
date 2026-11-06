@@ -62,6 +62,7 @@ class FakeHippoRAG:
         self.fact_embedding_store = FakeStore()
         self.deleted = []
         self.indexed = []
+        self.empty_paths = set()
         self.reloads = 0
 
     def delete(self, texts):
@@ -76,6 +77,8 @@ class FakeHippoRAG:
     def index_pdfs(self, paths):
         self.indexed.extend(paths)
         for number, path in enumerate(paths, start=1):
+            if str(path) in self.empty_paths:
+                continue
             hash_id = f"new-{number}"
             self.chunk_embedding_store.rows[hash_id] = {
                 "content": f"new chunk from {Path(path).name}",
@@ -246,6 +249,65 @@ def test_reindex_backs_up_deletes_and_indexes(index_env, tmp_path):
     assert hipporag.deleted == ["only a"]
     assert result["chunks_after"] == result["chunks_before"]
     assert {item["source_file"] for item in lifecycle.documents()} == {"a.pdf", "b.pdf"}
+    assert result["status"] == "success"
+    assert result["zero_chunk_files"] == []
+    assert result["warnings"] == []
+
+
+def test_reindex_reports_zero_chunk_files(index_env, tmp_path):
+    """PDF без извлечённых чанков не должен выглядеть успешной индексацией."""
+    lifecycle, hipporag, _ = index_env
+    empty = tmp_path / "empty.pdf"
+    empty.write_bytes(b"%PDF-1.4 empty")
+    hipporag.empty_paths.add(str(empty))
+
+    result = lifecycle.reindex([str(empty)])
+
+    assert result["status"] == "warning"
+    assert result["zero_chunk_files"] == ["empty.pdf"]
+    assert result["chunk_counts"] == {"empty.pdf": 0}
+    assert result["chunks_added"] == 0
+    assert len(result["warnings"]) == 1
+    assert "empty.pdf" in result["warnings"][0]
+    assert result["backup"]["name"] in result["warnings"][0]
+
+    status = lifecycle.status()
+    assert status["detail"]["zero_chunk_files"] == ["empty.pdf"]
+    assert status["detail"]["warnings"] == result["warnings"]
+
+
+def test_reindex_reports_zero_chunk_for_one_of_two_files(index_env, tmp_path):
+    lifecycle, hipporag, _ = index_env
+    empty = tmp_path / "empty.pdf"
+    empty.write_bytes(b"%PDF-1.4 empty")
+    pdf = tmp_path / "a.pdf"
+    pdf.write_bytes(b"%PDF-1.4 test")
+    hipporag.empty_paths.add(str(empty))
+
+    result = lifecycle.reindex([str(empty), str(pdf)])
+
+    assert result["status"] == "warning"
+    assert result["zero_chunk_files"] == ["empty.pdf"]
+    assert result["chunk_counts"] == {"a.pdf": 1, "empty.pdf": 0}
+    assert result["chunks_added"] == 1
+    assert hipporag.indexed == [str(empty), str(pdf)]
+    assert {item["source_file"] for item in lifecycle.documents()} == {"a.pdf", "b.pdf"}
+
+
+def test_reindex_zero_chunk_of_existing_document_mentions_backup(index_env, tmp_path):
+    """Если пустой PDF заменил существующий документ, warning должен указать бэкап."""
+    lifecycle, hipporag, _ = index_env
+    pdf = tmp_path / "a.pdf"
+    pdf.write_bytes(b"%PDF-1.4 test")
+    hipporag.empty_paths.add(str(pdf))
+
+    result = lifecycle.reindex([str(pdf)])
+
+    assert result["status"] == "warning"
+    assert result["zero_chunk_files"] == ["a.pdf"]
+    assert result["chunk_counts"] == {"a.pdf": 0}
+    assert "a.pdf" not in {item["source_file"] for item in lifecycle.documents()}
+    assert result["backup"]["name"] in result["warnings"][0]
 
 
 def test_reindex_rejects_missing_pdf(index_env, tmp_path):
