@@ -5,7 +5,14 @@
 
 ## 1. Установка
 
-Нужны Python 3.10–3.12 и 8+ ГБ RAM.
+Нужны Python 3.10–3.12 и 8+ ГБ RAM. Самый быстрый путь (H2-3):
+
+- Windows: `start.bat`;
+- Linux/macOS: `./start.sh`;
+- Docker: `docker compose up --build` (Python не нужен, LM Studio — на хосте).
+
+Скрипт сам создаст `.venv`, установит зависимости, скопирует `.env.example` в
+`.env` и проверит LM Studio. Ручная установка:
 
 ```bash
 git clone https://github.com/L-MORIA/HippoRAG.git
@@ -59,7 +66,8 @@ python scripts/show_index_stats.py --save_dir outputs/astrology_test
 
 ## 4. Запуск
 
-Веб-интерфейс:
+Самый простой способ — `start.bat` / `./start.sh`; Docker — `docker compose up
+--build`. Ручной запуск веб-интерфейса:
 
 ```powershell
 $env:PYTHONIOENCODING = "utf-8"

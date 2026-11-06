@@ -65,9 +65,53 @@ extra ставится только на Python 3.10–3.13. Подробнос�
 curl http://localhost:1234/v1/models
 ```
 
+### 3.1. One-command start (H2-3)
+
+Windows:
+
+```bat
+start.bat
+```
+
+Linux/macOS:
+
+```bash
+chmod +x start.sh   # если файл потерял бит исполнения
+./start.sh
+```
+
+Скрипт сам создаёт `.venv`, ставит зависимости (`pip install -e .`), копирует
+`.env.example` в `.env` (если `.env` ещё нет), проверяет LM Studio и индекс и
+запускает UI на `http://127.0.0.1:8000/`. Проверку LM Studio можно отключить:
+`--skip-lm-check` или `STARTUP_CHECK_LM=0`. Подробности —
+[H2_3_PACKAGING_2026-11-06.md](./H2_3_PACKAGING_2026-11-06.md).
+
+### 3.2. Docker (CPU-only, H2-3)
+
+```bash
+docker compose up --build
+```
+
+LM Studio остаётся на хосте: compose обращается к ней по
+`http://host.docker.internal:1234/v1`. Порт опубликован только на
+`127.0.0.1:8000`. Каталоги `outputs/`, `data/`, `temp_uploads/` и `cache/`
+монтируются с хоста; `data/` — только на чтение.
+
+```bash
+docker compose ps
+docker compose logs -f hipporag
+docker compose down
+```
+
+Первый `--build` и первый старт долгие: скачиваются torch, зависимости и
+embedding-модель. На Linux, если bind-mount принадлежит вашему пользователю,
+задайте `DOCKER_UID`/`DOCKER_GID` (см. H2-3). Healthcheck использует публичный
+`/ui/config`, а не `/health` (тот закрыт API-ключом).
+
 ## 4. Конфигурация
 
-Создайте в корне проекта файл `.env` (он в `.gitignore`, в git не попадёт):
+One-command скрипт создаёт `.env` автоматически. При ручном запуске создайте
+файл `.env` в корне проекта (он в `.gitignore`, в git не попадёт):
 
 ```dotenv
 LLM_NAME=gemma-4-e4b
@@ -304,7 +348,9 @@ ablation, а не полный путь H1-6. Детали —
 
 ### 7.3. Веб-интерфейс (H2-1)
 
-UI поднимается тем же приложением, что и API, и использует тот же индекс:
+Самый простой запуск — `start.bat` / `./start.sh` (H2-3). Ниже — ручной
+вариант; UI поднимается тем же приложением, что и API, и использует тот же
+индекс:
 
 ```powershell
 $env:PYTHONIOENCODING = "utf-8"
@@ -344,9 +390,10 @@ outputs/feedback/feedback.jsonl
 сохраняются: только вопрос, ответ, режим, оценка, комментарий и цитаты.
 Детали и ограничения — в [H2_1_WEB_UI_2026-11-05.md](./H2_1_WEB_UI_2026-11-05.md).
 
-> Режим 5 в UI — измеренный чанковый путь CLI. Page-level вариант H1-6 прошёл
-> приёмку (M7: **87.0 %** page recall@5), но в UI пока не подключён — это
-> следующий шаг.
+> С H1-6 режим 5 в UI — **page-level** путь (единица выдачи — страница):
+> M7 дал **87,0 %** page recall@5, на 40 вопросах H1-1 — 80,0 %, p95 416 мс.
+> Чанковый baseline H2-6 возвращается переменной
+> `ASTRO_RETRIEVER_PAGE_LEVEL=0`.
 
 ## 8. Тесты
 
@@ -368,6 +415,8 @@ pytest tests/unit -m unit
 | `QA-кэш: N записей не прочитаны` | Записи старой версии схемы или другой модели — они будут пересчитаны, действие не требуется |
 | `OutlinesUnavailableError: Guided-декодирование … требует пакет outlines` | Не установлен `outlines` (нужен для offline-режима): `pip install -e ".[offline]"` либо `pip install "outlines>=1.0,<2"` |
 | Ошибки на Python 3.13/3.14 | Используйте Python 3.10–3.12 |
+| `start.bat`/`start.sh` завершается с ошибкой | Нет Python 3.10–3.12, LM Studio не запущена или занят порт — смотрите сообщение скрипта и [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) §1.1 |
+| Docker: `permission denied` на `outputs/` или `cache/` | UID/GID bind-mount не совпадает с контейнерным — задайте `DOCKER_UID`/`DOCKER_GID` или `chown` каталоги |
 | OCR не работает | Не установлен Tesseract или язык `rus` в нём |
 
 

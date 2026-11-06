@@ -9,6 +9,30 @@
 [docs/QUICKSTART_RU.md](docs/QUICKSTART_RU.md).
 План развития проекта — [docs/ROADMAP_REVISION_DEEPSEEK.md](docs/ROADMAP_REVISION_DEEPSEEK.md) (v1.2, горизонты H0 → H3).
 
+### One-command start (H2-3)
+
+```bat
+start.bat
+```
+
+Linux/macOS:
+
+```bash
+./start.sh
+```
+
+Docker (CPU-only, LM Studio остаётся на хосте):
+
+```bash
+docker compose up --build
+```
+
+Скрипт создаст `.venv`, установит зависимости, проверит LM Studio и запустит
+UI на `http://127.0.0.1:8000/`. Подробности и чек-лист приёмки —
+[docs/H2_3_PACKAGING_2026-11-06.md](docs/H2_3_PACKAGING_2026-11-06.md).
+
+### Вручную
+
 ```bash
 python -m pip install -e ".[dev]"
 python main.py
@@ -36,8 +60,12 @@ uvicorn astro_app.web:app --host 127.0.0.1 --port 8000
 
 | Режим | Когда выбирать | Почему |
 |---|---|---|
-| **5 «BM25+CE-ru»** ⭐ (по умолчанию) | обычный поиск по корпусу | p95 225 мс (втрое быстрее режима 2), recall@5 97,5 % по документам и **65,0 % по страницам**, LLM не нужен |
+| **5 «BM25+CE-ru»** ⭐ (по умолчанию) | обычный поиск по корпусу | page-level путь H1-6: p95 416 мс, recall@5 100 % по документам и **80,0 % по страницам** (40 вопросов H1-1); на golden set M7 page recall@5 **87,0 %**, LLM не нужен |
 | **2 «Граф»** ⭐ | нужен графовый поиск (entity linking + PPR) | recall@5 95,0 % по документам и 60,0 % по страницам, p50 545 мс, LLM не нужен |
+
+> С H1-6 режим 5 в UI и CLI по умолчанию отдаёт **страницы**, а не чанки.
+> Чанковый baseline H2-6 возвращается переменной
+> `ASTRO_RETRIEVER_PAGE_LEVEL=0`.
 
 Остальные 21 режим — экспертные: у каждого в меню указано, когда он уместен.
 Режимы 12 «Self-RAG» и 19 «GraphRAG» помечены ⏱ — по замерам их p95 больше

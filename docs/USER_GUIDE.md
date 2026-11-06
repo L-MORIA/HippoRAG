@@ -19,6 +19,19 @@
 
 ## 2. Установка
 
+Самый простой способ (H2-3):
+
+- Windows: `start.bat`;
+- Linux/macOS: `./start.sh`;
+- Docker: `docker compose up --build`.
+
+Скрипт создаст `.venv`, установит зависимости, скопирует `.env.example` в
+`.env` (если файла нет), проверит LM Studio и запустит UI. Приёмка на чистой
+машине ещё не проводилась; чек-лист —
+[H2_3_PACKAGING_2026-11-06.md](./H2_3_PACKAGING_2026-11-06.md).
+
+Ручная установка:
+
 ```bash
 git clone https://github.com/L-MORIA/HippoRAG.git
 cd HippoRAG
@@ -88,6 +101,12 @@ python scripts/show_index_stats.py --save_dir outputs/astrology_test
 
 ## 5. Запуск веб-интерфейса
 
+Самый простой способ — `start.bat` (Windows) или `./start.sh` (Linux/macOS):
+скрипт сам создаст окружение и проверит LM Studio. Docker-вариант:
+`docker compose up --build`; LM Studio при этом остаётся на хосте.
+
+Ручной запуск:
+
 ```powershell
 $env:PYTHONIOENCODING = "utf-8"
 $env:API_KEY = "your-secret-key"
@@ -121,9 +140,10 @@ uvicorn astro_app.web:app --host 127.0.0.1 --port 8000
 | `2` | **Граф** (экспертный) | нужны связи между понятиями | нет |
 | `1` | **Максимальный охват** (экспертный) | нужен более широкий поиск | да |
 
-Экспертные режимы скрыты под вкладкой «Экспертные». Режим 5 в UI — измеренный
-**чанковый** путь CLI. Новый page-level путь H1-6 пока не подключён: сначала
-нужен реальный замер page recall@5.
+Экспертные режимы скрыты под вкладкой «Экспертные». Режим 5 в UI — **page-level**
+путь H1-6: единица выдачи — страница, а не чанк. На golden set M7 page recall@5
+**87,0 %**, на 40 вопросах H1-1 — 80,0 %. Чанковый baseline H2-6 возвращается
+переменной `ASTRO_RETRIEVER_PAGE_LEVEL=0`.
 
 ### 6.2. Ответ
 
@@ -203,7 +223,8 @@ JSONL для fine-tuning.
 - Один общий `API_KEY`; нет пользователей, ролей и rate limiting.
 - Нет добавления/удаления PDF через UI — это задача H2-2. Пока используйте
   `index_pdfs.py`.
-- Нет Docker и one-command start — это H2-3.
+- Docker и one-command start реализованы в H2-3; приёмка на чистой машине
+  ещё не проводилась.
 - Нет дашборда метрик — это H2-4.
 
 ## 9. Если что-то не работает

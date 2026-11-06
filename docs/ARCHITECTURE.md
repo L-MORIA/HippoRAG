@@ -62,6 +62,7 @@
 | Кэш | `src/astro_app/qa_cache.py`, `llm_cache/` | QA-кэш CLI и кэш LLM |
 | Версии | `src/astro_app/versions.py` | `INDEX_FORMAT_VERSION`, `QA_CACHE_VERSION`, `PACKAGE_DATA_VERSION` |
 | Eval | `scripts/eval_*.py`, `scripts/grounding_*.py`, `eval/` | Golden set, recall, grounding-метрики |
+| Упаковка | `Dockerfile`, `docker-compose.yml`, `start.bat`, `start.sh`, `scripts/start.py` | One-command запуск и CPU-only Docker (H2-3) |
 
 ## 3. Путь запроса Web UI
 
@@ -90,7 +91,7 @@
 
 | Режим | Путь | Единица выдачи | LLM на этапе поиска |
 |---|---|---|---|
-| `5` «Быстрый» | `search_bm25_hybrid_ru` | Чанк | Нет |
+| `5` «Быстрый» | `bm25_hybrid_ru_mode` → page-level H1-6 | Страница (`PageHit`) | Нет |
 | `2` «Граф» | графовый PPR | Чанк | Нет |
 | `1` «Максимальный охват» | multi-vector + переформулировка | Чанк | Да |
 
@@ -99,8 +100,8 @@
 
 H1-6 добавил page-level путь (`search_bm25_hybrid_ru_pages`) и адаптер
 `scripts/grounding_astro_retriever.py`. Он прошёл приёмку в M7: **87.0 %**
-page recall@5 при цели 80 %. В UI пока не подключён — это следующий шаг.
-Чанковый baseline H2-6 остаётся доступен через
+page recall@5 при цели 80 % и с 2026-11-06 является путём по умолчанию для
+режима 5 в UI и CLI. Чанковый baseline H2-6 остаётся доступен через
 `ASTRO_RETRIEVER_PAGE_LEVEL=0`.
 
 ## 5. Контракт заземления
@@ -178,8 +179,11 @@ page recall@5 при цели 80 %. В UI пока не подключён — �
 ## 10. Ограничения и направления
 
 - H2-2: нет add/delete/reindex из UI, а также backup/restore и статуса индексации.
-- H2-3: нет Docker, Windows-установщика и one-command start.
+- H2-3: Docker CPU-only, `start.bat`/`start.sh` и `scripts/start.py` реализованы;
+  приёмка на чистой машине не проводилась.
 - H2-4: нет структурных логов, per-stage timings, метрик и дашборда.
-- H1-6: page-level retrieval реализован и прошёл приёмку (M7: **87.0 %** page recall@5); в UI не подключён.
+- H1-6: page-level retrieval реализован, прошёл приёмку (M7: **87.0 %** page recall@5)
+  и является путём по умолчанию для режима 5 в UI и CLI; чанковый baseline —
+  `ASTRO_RETRIEVER_PAGE_LEVEL=0`.
 - H2-6: после H1-6 7 из 8 метрик PASS; citation precision **0.621** < 0.80 — остаётся.
 - H2-1: приёмка с 5 внешними пользователями ещё не проведена.

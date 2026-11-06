@@ -19,6 +19,24 @@
 | `OutlinesUnavailableError: Guided-декодирование … требует пакет outlines` | Не установлен `outlines` | `pip install -e ".[offline]"` или `pip install "outlines>=1.0,<2"` |
 | `PackageDataError: Package-data несовместимы с кодом` | Данные и код разошлись | `python scripts/update_package_data_manifest.py` или переустановите пакет |
 
+### 1.1. One-command start и Docker (H2-3)
+
+| Симптом | Причина | Решение |
+|---|---|---|
+| `Python не найден` или `Нужен Python 3.10-3.12` | Нет поддерживаемой версии в PATH/`py` | Установите Python 3.10–3.12; `start.bat` ищет `py -3.12/3.11/3.10` |
+| `start.sh: Permission denied` | Потерян бит исполнения | `chmod +x start.sh` |
+| `LM Studio недоступна по ...` при старте | LM Studio не запущена или неверный `LLM_BASE_URL` | Developer → Start Server; проверьте `curl http://localhost:1234/v1/models`; временно `--skip-lm-check` или `STARTUP_CHECK_LM=0` |
+| `Модель '...' не найдена` | `LLM_API_NAME` не совпадает с id в LM Studio | Укажите id из `/v1/models`, например `google/gemma-4-e4b` |
+| `Для адреса вне loopback нужен API_KEY` | `scripts/start.py` не разрешает fail-open на `0.0.0.0` | Задайте `API_KEY` или запускайте на `127.0.0.1` |
+| `uvicorn не установлен` | Пакет не установлен в текущее окружение | `python -m pip install -e .` или запустите `start.bat`/`./start.sh` |
+| `.env` не создаётся | Каталог только для чтения (контейнер под non-root) | Передайте переменные окружения снаружи; это не ошибка запуска |
+| `docker: command not found` | Docker не установлен | Установите Docker Engine/Desktop |
+| Docker не видит LM Studio | `localhost` внутри контейнера — это контейнер | Compose уже задаёт `host.docker.internal`; для другого хоста — `LLM_BASE_URL_DOCKER` |
+| `permission denied` на `outputs/` или `cache/` | UID/GID bind-mount не совпадает | `DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) docker compose up` или `chown` каталоги |
+| `port is already allocated` | Порт 8000 занят | Измените `APP_PORT`/`ports` в compose или остановите старый контейнер |
+| Контейнер `unhealthy` | Первый старт скачивает модель; `/health` закрыт ключом | Смотрите `docker compose logs`; healthcheck использует `/ui/config`, `start_period` 600 с |
+| Docker ходит не на тот LLM | В контейнер попал хостовый `LLM_BASE_URL` | Задайте `LLM_BASE_URL_DOCKER=http://host.docker.internal:1234/v1` |
+
 ## 2. LM Studio и LLM
 
 | Симптом | Причина | Решение |

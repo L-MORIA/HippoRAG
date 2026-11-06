@@ -1,0 +1,52 @@
+# H2-3: локальный CPU-only запуск HippoRAG.
+# LM Studio должен быть запущен на хосте (Developer -> Start Server, порт 1234).
+#
+#   docker compose up --build
+#
+# Переменные берутся из .env (Compose читает его для подстановки ${...}).
+# Для доступа к индексу и PDF каталоги outputs/, data/, temp_uploads/, cache/
+# монтируются с хоста. На Linux права: см. docs/H2_3_PACKAGING_2026-11-06.md.
+
+services:
+  hipporag:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: hipporag:cpu
+    container_name: hipporag
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      APP_HOST: 0.0.0.0
+      APP_PORT: "8000"
+      LLM_NAME: ${LLM_NAME:-gemma-4-e4b}
+      LLM_API_NAME: ${LLM_API_NAME:-google/gemma-4-e4b}
+      # В контейнере localhost — это сам контейнер. Отдельная переменная
+      # не даёт хостовому LLM_BASE_URL (localhost) протечь внутрь.
+      LLM_BASE_URL: ${LLM_BASE_URL_DOCKER:-http://host.docker.internal:1234/v1}
+      SAVE_DIR: ${SAVE_DIR:-/app/outputs/astrology_test}
+      EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME:-sentence-transformers/paraphrase-multilingual-mpnet-base-v2}
+      API_KEY: ${API_KEY:-}
+      API_KEY_REQUIRED: ${API_KEY_REQUIRED:-0}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-200}
+      API_ALLOWED_ORIGINS: ${API_ALLOWED_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000}
+      FEEDBACK_PATH: ${FEEDBACK_PATH:-/app/outputs/feedback/feedback.jsonl}
+      STARTUP_CHECK_LM: ${STARTUP_CHECK_LM:-1}
+      STARTUP_CHECK_TIMEOUT: ${STARTUP_CHECK_TIMEOUT:-10}
+      HF_HOME: /app/cache/huggingface
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./outputs:/app/outputs
+      - ./data:/app/data:ro
+      - ./temp_uploads:/app/temp_uploads
+      - ./cache:/app/cache
+    user: "${DOCKER_UID:-10001}:${DOCKER_GID:-10001}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/ui/config >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      # Первый старт скачивает embedding-модель; 3 минут недостаточно.
+      start_period: 600s
+      retries: 3

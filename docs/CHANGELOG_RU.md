@@ -1,5 +1,51 @@
 # История изменений HippoRAG
 
+## 2026-11-06 — H2-3: упаковка, one-command start и Docker CPU-only
+
+### Добавлено
+- `Dockerfile` — `python:3.11-slim`, CPU-колёса `torch==2.5.1+cpu`,
+  non-root `appuser`, healthcheck `/ui/config`, запуск через `scripts/start.py`.
+- `docker-compose.yml` — порт только на `127.0.0.1:8000`,
+  `host.docker.internal`, bind-mount `outputs/`, `data/` (ro),
+  `temp_uploads/`, `cache/`; healthcheck с `start_period` 600 с.
+- `.dockerignore` — без `.env`, данных, кэша, тестов и docs.
+- `start.bat`, `start.sh` — выбор Python 3.10–3.12, `.venv`,
+  `pip install -e .`, копирование `.env.example` и запуск UI.
+- `scripts/start.py` — проверки Python, `.env`, LM Studio, индекса и
+  API-ключа; loopback без ключа автоматически включает fail-open, адрес
+  вне loopback без `API_KEY` не запускается.
+- `scripts/check_lmstudio.py` — проверка `/v1/models` и id модели только на
+  стандартной библиотеке; коды возврата 0/1.
+- 52 unit-теста: `test_lmstudio_check.py` (18), `test_start_script.py` (23),
+  `test_packaging_assets.py` (11).
+- `.env.example` — `APP_HOST`, `APP_PORT`, `STARTUP_CHECK_LM`,
+  `STARTUP_CHECK_TIMEOUT`, заметки по Docker и `LLM_BASE_URL_DOCKER`.
+- `.gitignore` — корневой `cache/`.
+
+### Проверено
+- `pytest tests/unit -q` — **524 passed, 1 skipped** (Python 3.14.3,
+  локальная машина, после rebase на `9061704`); из них 52 новых теста H2-3.
+- `black`, `isort`, `ruff` для новых файлов — без замечаний.
+- `docker-compose.yml` разбирается как YAML; контракт проверен тестами.
+- `check_lmstudio.py` на недоступном порту возвращает 1 с понятным
+  сообщением; `start.py --check-only` проходит проверки с отключённой
+  LM Studio.
+
+### Не проверено
+- Приёмка «чистая машина ≤ 15 мин»: нет Docker, чистой VM и LM Studio.
+- Сборка Docker-образа и живой запуск UI с LM Studio.
+- Синтаксис `start.sh` через `bash -n`: на машине нет `bash`.
+
+### Документация
+- Новый отчёт [H2_3_PACKAGING_2026-11-06.md](./H2_3_PACKAGING_2026-11-06.md)
+  с чек-листом приёмки и ограничениями.
+- Обновлены `README_RU.md`, `HOW_TO_RUN.md`, `USER_GUIDE.md`,
+  `ADMIN_GUIDE.md`, `ARCHITECTURE.md`, `TROUBLESHOOTING.md`, `FAQ.md`,
+  `QUICKSTART_RU.md`, `ROADMAP_REVISION_DEEPSEEK.md`.
+- Синхронизированы устаревшие утверждения H1-6: режим 5 в UI и CLI —
+  page-level путь (M7: 87,0 % page recall@5), чанковый baseline —
+  `ASTRO_RETRIEVER_PAGE_LEVEL=0`.
+
 ## 2026-11-06 — H1-6: page-level путь подключён к продукту (UI и CLI)
 
 ### Сделано

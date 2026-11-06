@@ -35,9 +35,37 @@
 | `FEEDBACK_PATH` | `outputs/feedback/feedback.jsonl` | Путь журнала оценок |
 | `HIPPORAG_REQUIRE_CROSSENCODER` | `0` | `1` — падать, если RU-CE недоступен |
 | `ASTRO_RETRIEVER_PAGE_LEVEL` | `1` | `0` — вернуть чанковый retrieval H1-6 |
+| `APP_HOST` | `127.0.0.1` | Адрес uvicorn для `scripts/start.py` |
+| `APP_PORT` | `8000` | Порт uvicorn для `scripts/start.py` |
+| `STARTUP_CHECK_LM` | `1` | `0` — не проверять LM Studio при старте |
+| `STARTUP_CHECK_TIMEOUT` | `5` | Таймаут проверки LM Studio, секунды |
+| `LLM_BASE_URL_DOCKER` | `http://host.docker.internal:1234/v1` | Адрес LM Studio для `docker compose` (только compose) |
+| `DOCKER_UID` / `DOCKER_GID` | `10001` | UID/GID контейнера для bind-mount (только compose) |
 
 Полный шаблон — `.env.example`. После изменения `.env` перезапустите сервер:
 часть настроек читается при импорте модуля.
+
+### 2.1. One-command start и Docker (H2-3)
+
+```bat
+start.bat
+```
+
+```bash
+./start.sh
+docker compose up --build
+```
+
+`start.bat`/`start.sh` создают `.venv`, ставят `pip install -e .`, копируют
+`.env.example` в `.env` и запускают `scripts/start.py`. Скрипт проверяет Python,
+LM Studio, индекс и API-ключ; на loopback без `API_KEY` он автоматически
+включает `API_KEY_REQUIRED=0`, а на адресе вне loopback без ключа отказывает.
+
+Docker-вариант CPU-only; LM Studio остаётся на хосте. Порт опубликован только
+на `127.0.0.1:8000`, `data/` смонтирован read-only. Для Linux при
+несовпадении UID/GID с bind-mount задайте `DOCKER_UID`/`DOCKER_GID` или
+сделайте `chown` для `outputs/`, `cache/`, `temp_uploads/`. Подробности и
+чек-лист приёмки — [H2_3_PACKAGING_2026-11-06.md](./H2_3_PACKAGING_2026-11-06.md).
 
 ## 3. Жизненный цикл индекса
 
@@ -268,13 +296,14 @@ UI-маршрутами. Отдельный процесс и отдельный
 - [ ] `outputs/feedback/` и каталог индекса доступны только эксплуататору.
 - [ ] Бэкап индекса и `.env` снят и проверен на восстановление.
 - [ ] `API_KEY_REQUIRED=0` не используется на публичном интерфейсе.
+- [ ] Docker-порт опубликован только на `127.0.0.1`, а не на `0.0.0.0`.
 
 ## 8. Что ещё не реализовано
 
 | Задача | Статус |
 |---|---|
 | H2-2: add/delete/reindex, backup/restore, статус индексации | ✅ API и `/upload-and-ingest`; панель в Web UI — ⏳ |
-| H2-3: Docker, Windows-установщик, one-command start | ⏳ |
+| H2-3: Docker, one-command start, проверка LM Studio | ✅ реализовано; приёмка на чистой машине — ⏳ |
 | H2-4: структурные логи, метрики, дашборд | ⏳ |
 | H2-5: полный набор документации | ✅ этот документ и связанные гайды |
 | H2-6: перезамер grounding-метрик | ✅ M7: 7/8 PASS; citation precision 0.621 ниже цели |
@@ -282,6 +311,11 @@ UI-маршрутами. Отдельный процесс и отдельный
 ## 9. Быстрые команды
 
 ```bash
+# one-command start
+start.bat            # Windows
+./start.sh           # Linux/macOS
+docker compose up --build
+
 # индекс
 python index_pdfs.py --pdf_dir data/pdfs --output_dir outputs/astrology_test
 python scripts/show_index_stats.py --save_dir outputs/astrology_test

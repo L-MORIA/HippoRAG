@@ -16,6 +16,9 @@ __pycache__/
 nohup_out/
 # Ignore outputs directory
 outputs/
+# Кэш HuggingFace/моделей для Docker и one-command start (H2-3).
+# Только корень репозитория: пакетные каталоги с именем cache не скрываются.
+/cache/
 # Ignore data directory (ТОЛЬКО корень репозитория).
 # Без ведущего слэша паттерн игнорировал бы любой каталог data/ на любой
 # глубине — включая src/astro_app/data/, где лежит пакетный synonyms.json
