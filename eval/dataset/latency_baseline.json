@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-11-04T16:46:07",
-  "provenance": "слияние снимков трёх прогонов: режимы из последнего прогона заменяют одноимённые, остальные сохранены; у каждого режима своё происхождение (measured_at/source), сырые отчёты лежат вне репозитория (outputs/ в .gitignore)",
+  "generated_at": "2026-11-06T18:23:51",
+  "provenance": "слияние снимков: режимы из последнего прогона заменяют одноимённые, остальные сохранены; у каждого режима своё происхождение (measured_at/source), сырые отчёты лежат вне репозитория (outputs/ в .gitignore)",
   "index": "outputs/astrology_test",
   "dataset": {
     "path": "eval\\dataset\\questions.jsonl",
@@ -104,26 +104,27 @@
     },
     "5": {
       "label": "BM25+CE-ru",
-      "measured_at": "2026-11-04",
-      "source": "outputs/reports/eval_mode5.json",
-      "p50_ms": 197.3,
-      "p95_ms": 225.46,
-      "retrieval_p50_ms": 197.3,
-      "retrieval_p95_ms": 225.46,
+      "measured_at": "2026-11-06T18:23:51",
+      "source": "outputs\\reports\\eval_mode5_pages.json",
+      "p50_ms": 316.95,
+      "p95_ms": 415.825,
+      "retrieval_p50_ms": 316.95,
+      "retrieval_p95_ms": 415.825,
       "llm_calls_mean": 0.0,
-      "recall@k_doc": 0.975,
-      "mrr@k_doc": 0.9021,
-      "ndcg@k_doc": 0.9206,
+      "recall@k_doc": 1.0,
+      "recall@k_page": 0.8,
+      "mrr@k_doc": 0.975,
+      "mrr@k_page": 0.5869,
+      "ndcg@k_doc": 0.9815,
+      "ndcg@k_page": 0.6513,
       "adequacy_mean": null,
-      "recall@k_page": 0.65,
-      "mrr@k_page": 0.52,
-      "ndcg@k_page": null
+      "merged_at": "2026-11-06T18:23:51"
     }
   },
-  "merged_at": "2026-11-04T16:46:07",
+  "merged_at": "2026-11-06T18:23:51",
   "merged_modes": [
     "5"
   ],
   "top_level_scope": "index/dataset/llm/n_questions описывают ПОСЛЕДНИЙ прогон; у каждого режима своё происхождение — modes.<id>.measured_at и modes.<id>.source",
-  "measured_at_precision": "measured_at — дата сессии замера (время дня в исходных отчётах не зафиксировано); source — путь к сырому отчёту вне репозитория (outputs/ в .gitignore)"
+  "measured_at_precision": "measured_at — дата сессии замера; у режимов, перемеренных после 2026-11-06, — полный ISO-таймстамп, у более ранних время дня не зафиксировано; source — путь к сырому отчёту вне репозитория (outputs/ в .gitignore)"
 }
