@@ -254,11 +254,12 @@ M7 на том же golden set получает 87.0 %. Разница объя�
 M8 остаётся полезен как ablation: он показывает, что просто «взять страницу
 вместо чанка» недостаточно; нужен полный гибрид с boost и реранком.
 
-## 10. M2 — Citation coverage (по данным M7)
+## 10. M2 — Citation coverage
 
-Отдельного прогона legacy-режимов 12/19/21 нет. M2 закрыта по per-question
-данным M7 (`outputs/reports/grounding_eval.json`) на продуктовом пути:
-режим 5 + page-level H1-6 + grounding.
+M2 на продуктовом пути закрыта по per-question данным M7
+(`outputs/reports/grounding_eval.json`): режим 5 + page-level H1-6 +
+grounding. Отдельный прогон legacy-режимов 12/19/21 выполнен 2026-11-05 —
+§10.1.
 
 | Показатель | Значение |
 |---|---:|
@@ -290,6 +291,12 @@ M8 остаётся полезен как ablation: он показывает, �
 **Итог по M2:** доля ответов без цитаты — **0 %** у всех трёх legacy-режимов;
 цель достигнута и на них, оговорка «legacy отдельно не гонялись» снята.
 
+**Нюанс режима 21.** Два отказа (`b04-owen-planet-kitchen`,
+`u07-pickle-recipes`) содержат непустой текст с цитатой, но помечены
+`abstained=true` (grounding счёл ответ недостаточным). По определению M2 они
+не входят в знаменатель; если считать их ответами, ответов без цитаты всё
+равно 0.
+
 **Вторичные метрики (не M2):** citation precision у legacy 0.122–0.468 —
 цитаты в ответах есть, но часто не совпадают с gold-источниками; это хуже
 продуктового пути M7 (0.621). У режима 12 abstention 84.6 % (< 90 %) и false
@@ -304,7 +311,7 @@ abstention и false answer, но не precision/accuracy. Латентность
 | Параметр | Значение |
 |---|---|
 | Дата | 2026-11-05 |
-| Код | коммит `50cafbc` |
+| Код | приложение — `50cafbc`; адаптер — `0f3bceb` |
 | Индекс | `outputs/astrology_test/gemma-4-e4b_sentence-transformers_paraphrase-multilingual-mpnet-base-v2`: 1369 чанков, 3 PDF, формат v1, манифест `ok` |
 | LLM | LM Studio, API-id `google/gemma-4-e4b` (`LLM_NAME=gemma-4-e4b`), JIT-загрузка |
 | `qa_top_k` | 5 |
@@ -372,14 +379,11 @@ legacy 0.122–0.468).
    H2-1.
 3. **Перезамерить H2-6 после исправления citation precision** и обновить
    [H2_6_GROUNDING_REPORT_2026-11-05.md](./H2_6_GROUNDING_REPORT_2026-11-05.md).
-4. **Замерить legacy-режимы 12/19/21** по заданию
-   [TASK_M2_LEGACY_MODES_2026-11-05.md](./TASK_M2_LEGACY_MODES_2026-11-05.md),
-   чтобы снять оговорку об области M2.
 
 ## 14. Связанные документы
 
 - [MEASUREMENT_PLAN_2026-11-05.md](./MEASUREMENT_PLAN_2026-11-05.md) — план M1–M8.
-- [TASK_M2_LEGACY_MODES_2026-11-05.md](./TASK_M2_LEGACY_MODES_2026-11-05.md) — задание на отдельный замер M2 для legacy-режимов 12/19/21.
+- [TASK_M2_LEGACY_MODES_2026-11-05.md](./TASK_M2_LEGACY_MODES_2026-11-05.md) — выполненное задание и результаты M2 для legacy-режимов 12/19/21.
 - [H1_6_PAGE_RETRIEVAL_2026-11-05.md](./H1_6_PAGE_RETRIEVAL_2026-11-05.md) — реализация page-level retrieval.
 - [H2_6_GROUNDING_REPORT_2026-11-05.md](./H2_6_GROUNDING_REPORT_2026-11-05.md) — baseline заземления и перезамер M7.
 - [eval/dataset/RESULTS_REPORTED.md](../eval/dataset/RESULTS_REPORTED.md) — реестр агрегированных результатов.
