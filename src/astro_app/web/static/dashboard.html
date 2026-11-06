@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Наблюдаемость — HippoRAG</title>
+    <link rel="stylesheet" href="/ui/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="На главную">
+        <span class="brand-mark" aria-hidden="true">✦</span>
+        <span>
+          <strong>HippoRAG</strong>
+          <small>наблюдаемость</small>
+        </span>
+      </a>
+
+      <div class="topbar-actions">
+        <span id="dashboard-status" class="status status-muted" role="status">Проверяю сервер…</span>
+        <button id="refresh-btn" class="button button-ghost" type="button">Обновить</button>
+        <a class="button button-ghost" href="/">К поиску</a>
+      </div>
+    </header>
+
+    <main class="dashboard">
+      <section class="dashboard-hero" aria-labelledby="dashboard-title">
+        <p class="eyebrow">H2-4 · телеметрия процесса</p>
+        <h1 id="dashboard-title">Что происходит с сервером</h1>
+        <p class="lede">
+          Запросы, ошибки, пустые ответы, задержки и этапы обработки. Данные хранятся
+          в памяти процесса и сбрасываются при рестарте. Страница обновляется каждые 5 секунд.
+        </p>
+      </section>
+
+      <section id="key-panel" class="dashboard-section hidden" aria-labelledby="key-title">
+        <h2 id="key-title">Нужен ключ доступа</h2>
+        <p class="meta-text">Сервер защищён <code>API_KEY</code>. Ключ хранится только в этой вкладке.</p>
+        <div class="key-row">
+          <input id="key-input" type="password" autocomplete="off" spellcheck="false" placeholder="API_KEY" />
+          <button id="key-save" class="button button-primary" type="button">Войти</button>
+        </div>
+        <p id="key-error" class="alert alert-error hidden" role="alert"></p>
+      </section>
+
+      <section class="dashboard-section" aria-labelledby="cards-title">
+        <h2 id="cards-title">Сводка</h2>
+        <div id="metric-cards" class="metric-grid" aria-live="polite"></div>
+      </section>
+
+      <section class="dashboard-section" aria-labelledby="health-title">
+        <h2 id="health-title">Здоровье и индекс</h2>
+        <table class="metrics-table">
+          <tbody id="health-rows"></tbody>
+        </table>
+      </section>
+
+      <section class="dashboard-section" aria-labelledby="routes-title">
+        <h2 id="routes-title">Маршруты</h2>
+        <div class="table-wrap">
+          <table class="metrics-table">
+            <thead>
+              <tr>
+                <th scope="col">Маршрут</th>
+                <th scope="col">Запросы</th>
+                <th scope="col">Ошибки</th>
+                <th scope="col">Среднее, мс</th>
+                <th scope="col">Максимум, мс</th>
+              </tr>
+            </thead>
+            <tbody id="route-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="dashboard-section" aria-labelledby="stages-title">
+        <h2 id="stages-title">Этапы обработки</h2>
+        <div class="table-wrap">
+          <table class="metrics-table">
+            <thead>
+              <tr>
+                <th scope="col">Этап</th>
+                <th scope="col">Вызовов</th>
+                <th scope="col">Среднее, мс</th>
+                <th scope="col">Максимум, мс</th>
+              </tr>
+            </thead>
+            <tbody id="stage-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="dashboard-section" aria-labelledby="empty-title">
+        <h2 id="empty-title">Почему ответ пустой</h2>
+        <ul id="empty-reasons" class="reason-list"></ul>
+      </section>
+
+      <p class="meta-text dashboard-note">
+        Источник данных: <code>GET /health</code> и <code>GET /metrics</code>. Вопросы и тексты
+        ответов не логируются и не попадают в метрики.
+      </p>
+    </main>
+
+    <script src="/ui/dashboard.js" defer></script>
+  </body>
+</html>

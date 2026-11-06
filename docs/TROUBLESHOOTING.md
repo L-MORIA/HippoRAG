@@ -112,8 +112,9 @@ curl http://localhost:1234/v1/models
 # индекс
 python scripts/show_index_stats.py --save_dir outputs/astrology_test
 
-# здоровье API (ключ обязателен)
+# здоровье и метрики API (ключ обязателен)
 curl -H "X-API-Key: your-secret-key" http://127.0.0.1:8000/health
+curl -H "X-API-Key: your-secret-key" http://127.0.0.1:8000/metrics
 
 # unit-тесты без индекса и LLM
 pytest tests/unit -m unit -q
@@ -122,10 +123,50 @@ pytest tests/unit -m unit -q
 python scripts/check_docs_links.py
 ```
 
+### 7.1. Почему запрос медленный
+
+1. Возьмите `X-Request-ID` из заголовка ответа (в браузере — DevTools →
+   Network).
+2. Найдите событие `request_completed` с этим `request_id` и полем
+   `slow=true`: там есть `duration_ms` и маршрут.
+3. Для `/search` откройте `search_completed`, для `/api/ask` —
+   `ask_completed` с тем же `request_id` и посмотрите `stages`:
+   - `ask.retrieval` — поиск и переранжирование;
+   - `ask.answer` — вызов LLM, разбор цитат и repair-retry;
+   - `search.rag_qa` — полный вызов `HippoRAG.rag_qa`;
+   - `search.build_response` — сборка цитат и ответа.
+4. `/metrics` или `/ui/dashboard` покажет, какой маршрут и этап
+   накапливает задержку: `routes[].avg_ms/max_ms`,
+   `stages[].avg_ms/max_ms`, `latency.p95_ms`.
+
+Типичные причины: первый запрос после старта (загрузка модели),
+`ask.answer` заметно больше `ask.retrieval` (медленная LM Studio или
+повтор из-за цитат), `search.rag_qa` больше `build_response`
+(поиск/переранжирование). Порог `slow=true` задаётся `SLOW_REQUEST_MS`
+(по умолчанию 5000 мс).
+
+### 7.2. Почему ответ пустой
+
+Событие `answer_empty` содержит `reason`, `path`, число найденных
+фрагментов и этапы. Причины:
+
+| `reason` | Что означает | Что делать |
+|---|---|---|
+| `no_fragments` | Поиск не нашёл фрагментов, LLM не вызывался | Проверьте индекс, `SAVE_DIR`, режим и вопрос |
+| `llm_unavailable_or_empty` | LM Studio недоступен или вернул пустую строку | Проверьте `/v1/models`, модель и `LLM_API_NAME` |
+| `no_inline_citations` | Модель ответила без валидных `[n]` | Строгий режим H2-6; повторите или смените модель |
+| `no_citations` | В ответе нет использованных цитат | Проверьте grounding-контракт и ответ модели |
+| `abstained` | Явный отказ без более конкретной причины | Посмотрите `grounding_errors` в том же событии |
+
+Сводка по причинам — `empty_answers_by_reason` в `/metrics` и на
+`/ui/dashboard`. Вопросы, ответы и тексты фрагментов в события не
+пишутся.
+
 Если проблема воспроизводится, приложите:
 
 1. команду запуска и версию Python;
 2. фрагмент лога без секретов и содержимого корпуса;
-3. ответ `/health`;
+3. ответ `/health` и, если запрос медленный или пустой,
+   `X-Request-ID` и события `request_completed` / `answer_empty`;
 4. вывод `show_index_stats.py`;
 5. режим и вопрос, на котором воспроизводится ошибка.

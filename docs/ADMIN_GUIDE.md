@@ -32,6 +32,7 @@
 | `API_KEY_REQUIRED` | `1` | `0/false/no/off` — отключить ключ (только loopback) |
 | `API_ALLOWED_ORIGINS` | `http://localhost:3000,http://localhost:8000` | Разрешённые CORS-origin |
 | `MAX_UPLOAD_MB` | `200` | Лимит загружаемого PDF |
+| `SLOW_REQUEST_MS` | `5000` | Порог медленного запроса для метрик и WARNING-лога |
 | `FEEDBACK_PATH` | `outputs/feedback/feedback.jsonl` | Путь журнала оценок |
 | `HIPPORAG_REQUIRE_CROSSENCODER` | `0` | `1` — падать, если RU-CE недоступен |
 | `ASTRO_RETRIEVER_PAGE_LEVEL` | `1` | `0` — вернуть чанковый retrieval H1-6 |
@@ -252,7 +253,8 @@ X-API-Key: ваш-секретный-ключ
 
 | Маршрут | Назначение | Защита |
 |---|---|---|
-| `GET /health` | Статус, число чанков/фактов, `auth_failures` | `X-API-Key` |
+| `GET /health` | Статус, индекс, модели, `auth_failures` и сводка метрик | `X-API-Key` |
+| `GET /metrics` | Счётчики, задержки и per-stage timings | `X-API-Key` |
 | `POST /search` | Поиск через `HippoRAG.rag_qa` | `X-API-Key` |
 | `POST /ingest` | Индексация PDF по путям | `X-API-Key` |
 | `POST /upload-and-ingest` | Загрузка PDF и индексация с бэкапом (`?sync=true` — ждать результата) | `X-API-Key` |
@@ -264,7 +266,7 @@ X-API-Key: ваш-секретный-ключ
 | `POST /index/delete` | Удалить документы по `source_file` | `X-API-Key` |
 | `POST /index/reindex` | Переиндексировать PDF по путям (`?sync=true` — ждать результата) | `X-API-Key` |
 | `GET /docs` | Swagger UI | `X-API-Key` |
-| `GET /` , `GET /ui/*` | Статика Web UI | без ключа |
+| `GET /` , `GET /ui/*` | Статика Web UI и `/ui/dashboard` | без ключа |
 | `POST /api/ask` | Вопрос из Web UI | `X-API-Key` |
 | `POST /api/feedback` | Оценка ответа | `X-API-Key` |
 
@@ -281,6 +283,11 @@ uvicorn astro_app.web:app --host 127.0.0.1 --port 8000
 `astro_app.web:app` — то же приложение, что и `search_api`, с добавленными
 UI-маршрутами. Отдельный процесс и отдельный порт не нужны.
 
+Наблюдаемость доступна по `http://127.0.0.1:8000/ui/dashboard`: страница
+показывает здоровье, индекс, модели, запросы, ошибки, задержки, этапы и
+причины пустых ответов. HTML публичен, данные (`/health`, `/metrics`)
+запрашиваются после ввода ключа.
+
 ## 5. Обратная связь
 
 Каждая оценка — одна строка JSONL:
@@ -296,16 +303,44 @@ UI-маршрутами. Отдельный процесс и отдельный
 - Ротация не автоматизирована: остановите сервер, переименуйте файл и
   запустите снова. Следите за правами на каталог.
 
-## 6. Логи и мониторинг
+## 6. Логи и мониторинг (H2-4)
 
-- Логи пишутся в stdout с уровнем `INFO`.
-- `/search` логирует `abstained`, `grounding_errors`, число цитат, число
-  фрагментов, latency и p95 по последним запросам.
+- Обычные логи пишутся в stdout с уровнем `INFO`.
+- Структурные события пишутся в логгер `hipporag.events` одной JSON-строкой:
+  `request_completed`, `request_failed`, `unhandled_error`,
+  `search_completed`, `ask_completed`, `answer_empty`, `ask_failed`.
+- Каждый HTTP-ответ содержит `X-Request-ID`; по нему событие запроса
+  связывается с этапами `/search` или `/api/ask`.
+- `/search` по-прежнему пишет человекочитаемую строку с `abstained`,
+  `grounding_errors`, числом цитат/фрагментов, latency и p95.
 - `/health` возвращает `auth_required`, `auth_failures`, `index_version`,
   `index_state` (`ok/missing/stale/...`), `index_operation`
-  (`idle/running/error`) и число документов `documents`.
-- Структурных логов, per-stage timings и дашборда пока нет — это H2-4.
-  Для базовой диагностики используйте `grep` по логам и `/health`.
+  (`idle/running/error`), `documents`, `llm_model`, `embedding_model`,
+  `index_created_at` и компактную сводку `metrics`.
+- `GET /metrics` отдаёт полный снимок: запросы, ошибки 4xx/5xx, медленные
+  запросы, таймауты, пустые ответы по причинам, p50/p95/max, разбивку по
+  маршрутам и этапам. Требует `X-API-Key`.
+- `GET /ui/dashboard` — простая страница наблюдаемости: здоровье, индекс,
+  модели, метрики, маршруты, этапы и причины пустых ответов. HTML публичен,
+  данные подтягиваются только после ввода ключа.
+- Метрики хранятся в памяти процесса и обнуляются при рестарте. Порог
+  медленного запроса задаётся `SLOW_REQUEST_MS` (по умолчанию 5000 мс).
+
+Примеры:
+
+```bash
+# полный снимок метрик
+curl -H "X-API-Key: $API_KEY" http://127.0.0.1:8000/metrics
+
+# найти медленный запрос и его этапы
+grep '"event":"request_completed"' server.log | grep '"slow":true'
+grep '"event":"ask_completed"' server.log | tail -n 5
+
+# почему ответ пустой
+grep '"event":"answer_empty"' server.log | tail -n 5
+```
+
+Дашборд открывается по адресу `http://127.0.0.1:8000/ui/dashboard`.
 
 ## 7. Чек-лист безопасности
 
@@ -324,7 +359,7 @@ UI-маршрутами. Отдельный процесс и отдельный
 |---|---|
 | H2-2: add/delete/reindex, backup/restore, статус индексации | ✅ API и `/upload-and-ingest`; панель в Web UI — ⏳ |
 | H2-3: Docker, one-command start, проверка LM Studio | ✅ реализовано; приёмка на чистой машине — ⏳ |
-| H2-4: структурные логи, метрики, дашборд | ⏳ |
+| H2-4: структурные логи, метрики, дашборд | ✅ JSON-события, `/metrics`, `/health`, `/ui/dashboard`; метрики в памяти |
 | H2-5: полный набор документации | ✅ этот документ и связанные гайды |
 | H2-6: перезамер grounding-метрик | ✅ M7: 7/8 PASS; citation precision 0.621 ниже цели |
 

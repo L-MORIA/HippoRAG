@@ -23,6 +23,7 @@
 │  ├─ /api/ask      (Web UI)   │
 │  ├─ /api/feedback (JSONL)    │
 │  ├─ /search       (rag_qa)   │
+│  ├─ /metrics      (H2-4)     │
 │  └─ /health                  │
 └──────┬───────────────┬───────┘
        │               │
@@ -54,8 +55,9 @@
 | Режимы поиска | `src/astro_app/modes/` | 23 `ModeSpec`: BM25, граф, dense, RRF, LLM-режимы |
 | Page-level retrieval | `src/astro_app/page_retrieval.py` | Группировка чанков по странице, RRF, RU-CE (H1-6) |
 | Grounding | `src/astro_app/grounded_qa.py`, `src/hipporag/qa/grounding.py` | Контракт `ОТВЕТ / ИСТОЧНИКИ / ОТКАЗ`, парсер `[n]` |
-| Web UI | `src/astro_app/web/` | Три режима, `/api/ask`, `/api/feedback`, статика |
-| API | `src/hipporag/search_api/server.py` | FastAPI, auth guard, `/search`, `/health`, ингест |
+| Web UI | `src/astro_app/web/` | Три режима, `/api/ask`, `/api/feedback`, статика, дашборд |
+| API | `src/hipporag/search_api/server.py` | FastAPI, auth guard, `/search`, `/health`, `/metrics`, ингест |
+| Наблюдаемость | `src/hipporag/search_api/observability.py` | JSON-события, `X-Request-ID`, метрики, per-stage timings (H2-4) |
 | Ядро | `src/hipporag/HippoRAG.py`, `StandardRAG.py` | Индекс, граф, retrieval, QA |
 | Хранилища | `src/hipporag/embedding_store.py`, `vector_stores/` | Parquet-эмбеддинги, метаданные |
 | PDF-ингест | `src/hipporag/pdf_ingestion/` | Извлечение текста, OCR, чанкинг |
@@ -86,6 +88,26 @@
 Если фрагментов нет, LLM не вызывается: возвращается общий отказ с
 `no_fragments`. Если LLM вернул пустую строку — отказ с
 `llm_unavailable_or_empty`.
+
+### 3.1. Наблюдаемость (H2-4)
+
+1. `observability_middleware` принимает или генерирует `X-Request-ID`,
+   замеряет полное время запроса и пишет JSON-событие
+   `request_completed`; при исключении — `request_failed`.
+2. `/search` пишет `search_completed` с этапами `rag_qa` и
+   `build_response`; `/api/ask` — `ask_completed` с этапами `retrieval`,
+   `answer`, `total`.
+3. Если ответ пустой, пишется `answer_empty` с причиной
+   (`no_fragments`, `llm_unavailable_or_empty`, `no_inline_citations`,
+   `no_citations`, `abstained`).
+4. `Metrics` в памяти агрегирует запросы, ошибки 4xx/5xx, медленные
+   запросы, таймауты, пустые ответы, p50/p95/max и этапы.
+5. `GET /metrics` отдаёт полный снимок; `GET /health` — компактную
+   сводку плюс `llm_model`, `embedding_model`, `index_created_at`.
+6. `/ui/dashboard` показывает здоровье, индекс, метрики, маршруты,
+   этапы и причины пустых ответов.
+
+Метрики не персистентны: рестарт процесса их обнуляет.
 
 ## 4. Режимы и единицы поиска
 
@@ -181,7 +203,9 @@ page recall@5 при цели 80 % и с 2026-11-06 является путём 
 - H2-2: нет add/delete/reindex из UI, а также backup/restore и статуса индексации.
 - H2-3: Docker CPU-only, `start.bat`/`start.sh` и `scripts/start.py` реализованы;
   приёмка на чистой машине не проводилась.
-- H2-4: нет структурных логов, per-stage timings, метрик и дашборда.
+- H2-4: структурные логи, per-stage timings, метрики, `/metrics` и
+  `/ui/dashboard` реализованы; метрики хранятся в памяти и сбрасываются
+  при рестарте, экспорта в Prometheus/OTLP нет.
 - H1-6: page-level retrieval реализован, прошёл приёмку (M7: **87.0 %** page recall@5)
   и является путём по умолчанию для режима 5 в UI и CLI; чанковый baseline —
   `ASTRO_RETRIEVER_PAGE_LEVEL=0`.

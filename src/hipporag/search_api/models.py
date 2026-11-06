@@ -77,6 +77,64 @@ class IngestResponse(BaseModel):
     )
 
 
+# ── H2-4: наблюдаемость ─────────────────────────────────────────────────────
+
+
+class LatencyMetrics(BaseModel):
+    """Сводка задержек по последним запросам."""
+
+    count: int = Field(default=0, description="Сколько запросов учтено")
+    avg_ms: float = Field(default=0.0, description="Средняя задержка, мс")
+    p50_ms: float = Field(default=0.0, description="Медиана, мс")
+    p95_ms: float = Field(default=0.0, description="95-й перцентиль, мс")
+    max_ms: float = Field(default=0.0, description="Максимальная задержка, мс")
+
+
+class RouteMetrics(BaseModel):
+    """Счётчики одного HTTP-маршрута."""
+
+    requests: int = Field(default=0, description="Количество запросов")
+    errors: int = Field(default=0, description="Ответы 4xx/5xx")
+    avg_ms: float = Field(default=0.0, description="Средняя задержка, мс")
+    max_ms: float = Field(default=0.0, description="Максимальная задержка, мс")
+
+
+class StageMetrics(BaseModel):
+    """Счётчики одного этапа обработки."""
+
+    count: int = Field(default=0, description="Сколько раз этап выполнялся")
+    avg_ms: float = Field(default=0.0, description="Средняя длительность, мс")
+    max_ms: float = Field(default=0.0, description="Максимальная длительность, мс")
+
+
+class MetricsSummary(BaseModel):
+    """Компактная сводка метрик для ``/health`` и ``/metrics``."""
+
+    requests_total: int = Field(default=0, description="Всего HTTP-запросов")
+    errors_total: int = Field(default=0, description="Ответы 4xx/5xx")
+    client_errors_total: int = Field(default=0, description="Ответы 4xx")
+    server_errors_total: int = Field(default=0, description="Ответы 5xx")
+    slow_requests_total: int = Field(default=0, description="Запросы медленнее порога")
+    timeouts_total: int = Field(default=0, description="Таймауты внешних вызовов")
+    empty_answers_total: int = Field(default=0, description="Пустые ответы")
+    empty_answers_by_reason: Dict[str, int] = Field(
+        default_factory=dict, description="Пустые ответы по причинам"
+    )
+    slow_threshold_ms: float = Field(default=5000.0, description="Порог медленного запроса, мс")
+    latency: LatencyMetrics = Field(default_factory=LatencyMetrics)
+    routes: Dict[str, RouteMetrics] = Field(default_factory=dict)
+    stages: Dict[str, StageMetrics] = Field(default_factory=dict)
+
+
+class MetricsResponse(MetricsSummary):
+    """Ответ ``GET /metrics`` с временем работы сервиса."""
+
+    uptime_seconds: float = Field(default=0.0, description="Время работы сервиса, секунды")
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc), description="Текущее время"
+    )
+
+
 class HealthResponse(BaseModel):
     status: str = Field(default="healthy", description="Статус сервиса")
     version: str = Field(default="1.0.0", description="Версия API")
@@ -99,6 +157,16 @@ class HealthResponse(BaseModel):
         default="idle", description="Текущая операция с индексом (idle/running/error)"
     )
     documents: int = Field(default=0, description="Количество документов в индексе")
+    llm_model: Optional[str] = Field(default=None, description="LLM из манифеста индекса")
+    embedding_model: Optional[str] = Field(
+        default=None, description="Модель эмбеддингов из манифеста индекса"
+    )
+    index_created_at: Optional[str] = Field(
+        default=None, description="Когда создан индекс (ISO 8601)"
+    )
+    metrics: MetricsSummary = Field(
+        default_factory=MetricsSummary, description="Сводка запросов, ошибок и задержек"
+    )
     timestamp: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc), description="Текущее время"
     )

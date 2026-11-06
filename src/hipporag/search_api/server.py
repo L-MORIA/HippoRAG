@@ -27,6 +27,8 @@ from .models import (
     IngestRequest,
     IngestResponse,
     IngestStats,
+    MetricsResponse,
+    MetricsSummary,
     ReindexRequest,
     ReindexResponse,
     RestoreRequest,
@@ -34,6 +36,18 @@ from .models import (
     SearchRequest,
     SearchResponse,
     SearchResult,
+)
+from .observability import (
+    REQUEST_ID_HEADER,
+    classify_empty_answer,
+    elapsed_ms,
+    get_request_id,
+    is_timeout_error,
+    log_event,
+    metrics,
+    request_id_from_header,
+    reset_request_id,
+    set_request_id,
 )
 
 # Настройка логирования
@@ -222,17 +236,71 @@ async def api_key_guard(request: Request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def observability_middleware(request: Request, call_next):
+    """H2-4: request ID, длительность и структурное событие запроса.
+
+    Регистрируется после guard, но до CORS: CORS остаётся внешним слоем
+    (N2/N5), а observability видит ответы guard, включая 401, и ответы
+    маршрутов. 5xx от необработанных исключений учитываются в ``except``.
+    """
+    request_id = request_id_from_header(request.headers.get(REQUEST_ID_HEADER))
+    token = set_request_id(request_id)
+    started = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        response.headers[REQUEST_ID_HEADER] = request_id
+        return response
+    except Exception as error:
+        duration_ms = elapsed_ms(started)
+        log_event(
+            "request_failed",
+            level=logging.ERROR,
+            method=request.method,
+            path=request.url.path,
+            duration_ms=duration_ms,
+            error_type=type(error).__name__,
+            error=str(error)[:300],
+        )
+        if is_timeout_error(error):
+            metrics.record_timeout()
+        raise
+    finally:
+        duration_ms = elapsed_ms(started)
+        route = request.scope.get("route")
+        route_path = getattr(route, "path", None) or request.url.path
+        slow = metrics.record_request(route_path, status_code, duration_ms)
+        level = logging.DEBUG if request.url.path in ("/health", "/metrics") else logging.INFO
+        if slow:
+            level = logging.WARNING
+        log_event(
+            "request_completed",
+            level=level,
+            method=request.method,
+            path=request.url.path,
+            route=route_path,
+            status_code=status_code,
+            duration_ms=duration_ms,
+            slow=slow,
+        )
+        reset_request_id(token)
+
+
 # CORS middleware для веб-приложений.
-# Регистрируется ПОСЛЕ guard: в Starlette последний добавленный middleware становится
-# внешним, поэтому CORS обрамляет guard и добавляет свои заголовки ко всем ответам,
-# включая 401 — без дублирования списка origin внутри guard (N2/N5).
+# Регистрируется ПОСЛЕ guard и observability: в Starlette последний добавленный
+# middleware становится внешним, поэтому CORS обрамляет их и добавляет свои
+# заголовки ко всем ответам, включая 401 — без дублирования списка origin
+# внутри guard (N2/N5).
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     # X-API-Key нужен браузерному клиенту для передачи ключа (D1 из вердикта Mavis)
-    allow_headers=["Content-Type", "Authorization", "X-API-Key"],
+    allow_headers=["Content-Type", "Authorization", "X-API-Key", REQUEST_ID_HEADER],
+    expose_headers=[REQUEST_ID_HEADER],
 )
 
 
@@ -259,6 +327,20 @@ async def health_check():
         index_state=index_meta.get("format_state", "unknown"),
         index_operation=index_info.get("state", "idle"),
         documents=index_meta.get("documents", 0),
+        llm_model=index_meta.get("llm_name") or getattr(_app_config, "llm_name", None),
+        embedding_model=index_meta.get("embedding_model")
+        or getattr(_app_config, "embedding_model_name", None),
+        index_created_at=index_meta.get("created_at"),
+        metrics=MetricsSummary(**metrics.snapshot()),
+    )
+
+
+@app.get("/metrics", response_model=MetricsResponse, tags=["observability"])
+async def get_metrics() -> MetricsResponse:
+    """H2-4: счётчики запросов, ошибок, пустых ответов и per-stage timings."""
+    return MetricsResponse(
+        uptime_seconds=round(time.time() - start_time, 1),
+        **metrics.snapshot(),
     )
 
 
@@ -391,15 +473,17 @@ async def search(request: SearchRequest):
     if hipporag is None:
         raise HTTPException(status_code=500, detail="Система не инициализирована")
 
+    started = time.perf_counter()
     try:
-        start_time = time.time()
-
+        rag_started = time.perf_counter()
         # Выполнение поиска
         results = hipporag.rag_qa(queries=[request.question])
         result = results[0][
             0
         ]  # results[0] = tuple, [0] = queries_solutions list, [0] = first QuerySolution
+        rag_qa_ms = elapsed_ms(rag_started)
 
+        build_started = time.perf_counter()
         # Подготовка цитат: только те, на которые ответ реально сослался.
         # Полный список найденных фрагментов остаётся в retrieved_docs.
         citations = []
@@ -415,9 +499,6 @@ async def search(request: SearchRequest):
                 }
             )
 
-        # Вычисление времени обработки
-        processing_time = time.time() - start_time
-
         # Грубая оценка заземления, а не вероятность правильности ответа.
         if result.abstained or not citations:
             confidence = 0.0
@@ -426,6 +507,8 @@ async def search(request: SearchRequest):
         else:
             confidence = 1.0
 
+        build_ms = elapsed_ms(build_started)
+        processing_time = time.perf_counter() - started
         search_result = SearchResult(
             answer=result.answer,
             confidence=confidence,
@@ -438,6 +521,17 @@ async def search(request: SearchRequest):
             processing_time=processing_time,
         )
 
+        metrics.record_stage("search", "rag_qa", rag_qa_ms)
+        metrics.record_stage("search", "build_response", build_ms)
+        metrics.record_stage("search", "total", processing_time * 1000)
+        empty_reason = classify_empty_answer(
+            abstained=result.abstained,
+            citations=len(citations),
+            grounding_errors=result.grounding_errors,
+        )
+        if empty_reason:
+            metrics.record_empty_answer(empty_reason)
+
         _GROUNDING_LATENCIES_MS.append(processing_time * 1000)
         logger.info(
             "search: abstained=%s grounding_errors=%s used_citations=%d "
@@ -449,10 +543,38 @@ async def search(request: SearchRequest):
             processing_time * 1000,
             grounding_p95_latency_ms(),
         )
+        stages = {
+            "rag_qa_ms": rag_qa_ms,
+            "build_response_ms": build_ms,
+            "total_ms": round(processing_time * 1000, 1),
+        }
+        log_event(
+            "search_completed",
+            abstained=result.abstained,
+            grounding_errors=result.grounding_errors,
+            used_citations=len(citations),
+            retrieved_docs=len(result.docs),
+            latency_ms=round(processing_time * 1000, 1),
+            p95_ms=grounding_p95_latency_ms(),
+            empty_reason=empty_reason,
+            stages=stages,
+        )
+        if empty_reason:
+            log_event(
+                "answer_empty",
+                path="/search",
+                reason=empty_reason,
+                abstained=result.abstained,
+                retrieved_docs=len(result.docs),
+                used_citations=len(citations),
+                stages=stages,
+            )
 
         return SearchResponse(data=search_result)
 
     except Exception as e:
+        if is_timeout_error(e):
+            metrics.record_timeout()
         logger.error(f"Ошибка поиска: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Внутренняя ошибка поиска")
 
@@ -629,6 +751,18 @@ async def upload_and_ingest(
 async def global_exception_handler(request, exc):
     """Глобальный обработчик исключений."""
     logger.error(f"Необработанное исключение: {str(exc)}", exc_info=True)
+    log_event(
+        "unhandled_error",
+        level=logging.ERROR,
+        path=request.url.path,
+        method=request.method,
+        error_type=type(exc).__name__,
+        error=str(exc)[:300],
+    )
+    headers = {}
+    request_id = get_request_id()
+    if request_id:
+        headers[REQUEST_ID_HEADER] = request_id
     return JSONResponse(
         status_code=500,
         content={
@@ -636,6 +770,7 @@ async def global_exception_handler(request, exc):
             "error": "Внутренняя ошибка сервера",
             "detail": None,
         },
+        headers=headers or None,
     )
 
 

@@ -1,5 +1,42 @@
 # История изменений HippoRAG
 
+## 2026-11-06 — H2-4: структурные логи, метрики и дашборд
+
+### Добавлено
+- `src/hipporag/search_api/observability.py` — JSON-события в логгер
+  `hipporag.events` (`request_completed`, `request_failed`,
+  `unhandled_error`, `search_completed`, `ask_completed`, `answer_empty`,
+  `ask_failed`), `X-Request-ID`, потокобезопасные метрики в памяти,
+  классификация причин пустого ответа и распознавание таймаутов клиентов.
+- `observability_middleware` в `search_api/server.py`: request ID,
+  длительность, `slow`-флаг, счётчики запросов/ошибок; middleware стоит
+  между guard и CORS, поэтому видит и `401`, и ответы маршрутов.
+- Per-stage timings: `/search` — `rag_qa`, `build_response`, `total`;
+  `/api/ask` — `retrieval`, `answer`, `total`.
+- `GET /metrics` — полный снимок: запросы, ошибки 4xx/5xx, медленные
+  запросы, таймауты, пустые ответы по причинам, p50/p95/max, маршруты и
+  этапы.
+- `GET /health` дополнен `llm_model`, `embedding_model`,
+  `index_created_at` и компактной сводкой `metrics`; существующие поля не
+  менялись.
+- `/ui/dashboard` — страница наблюдаемости: здоровье, индекс, модели,
+  карточки метрик, маршруты, этапы и причины пустых ответов; ссылка
+  «Статус» добавлена в шапку UI.
+- `SLOW_REQUEST_MS` — порог медленного запроса (по умолчанию 5000 мс).
+
+### Тесты
+- `tests/unit/test_observability.py` — 11 новых тестов: счётчики,
+  агрегация этапов, причины пустого ответа, таймауты, JSON-события,
+  `X-Request-ID`, поля `/health`, `/metrics`, события `/search` и
+  `/api/ask`, маршрут и статика дашборда.
+- `pytest tests/unit/test_observability.py -q` — **11 passed**.
+- `pytest tests/unit -q` — **541 passed, 1 skipped** (Python 3.11.9).
+
+### Документация
+- Новый отчёт [H2_4_OBSERVABILITY_2026-11-06.md](./H2_4_OBSERVABILITY_2026-11-06.md).
+- Обновлены `ADMIN_GUIDE.md`, `ARCHITECTURE.md`, `TROUBLESHOOTING.md`,
+  `ROADMAP_REVISION_DEEPSEEK.md`.
+
 ## 2026-11-06 — H2-2: диагностика нулевых чанков при переиндексации
 
 ### Исправлено
