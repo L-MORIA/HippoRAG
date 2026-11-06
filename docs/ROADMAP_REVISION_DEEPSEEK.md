@@ -152,6 +152,16 @@ Health-check выполнен верификатором аудита пакет
 87,0 % у page-level); 3) citation precision до ≥0,80; 4) живая приёмка H2,
 H2-3/H2-4, H3.
 
+> **Обновление 2026-11-06 (после `a571db2`).** Пункты 1 и 2 из списка выше
+> закрыты. 1) H1-5: джоб переведён на синтетическую фикстуру
+> `fixtures/synthetic_mini` (генератор `scripts/make_synthetic_fixture.py`,
+> gate recall@5 ≥ 0,9, замер 1,0; ни строки из корпуса — см. §9.2 H1-5 и
+> `PLAN_VERIFICATION_REPORT` §5.5). 2) Web UI → page-level: режим 5 —
+> page-level по умолчанию с `87ace00`, чанковый вариант через
+> `ASTRO_RETRIEVER_PAGE_LEVEL=0` (см. §6.1 отчёта верификации и запись в
+> `CHANGELOG_RU.md`). Остаются открытыми: citation precision, живая приёмка
+> H2, H2-3/H2-4, H3.
+
 ---
 
 Приоритеты используются те же, что в исходном роадмапе:
