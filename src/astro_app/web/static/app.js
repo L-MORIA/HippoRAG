@@ -304,7 +304,9 @@ async function saveKey(event) {
     return;
   }
 
+  // F-UX: ключ durable — не спрашиваем повторно после перезагрузки/закрытия вкладки.
   safeSet(sessionStorage, API_KEY_STORAGE, key);
+  safeSet(localStorage, API_KEY_STORAGE, key);
   updateKeyButton();
   closeKeyDialog();
   await refreshHealth();
@@ -475,14 +477,15 @@ function renderRefusalReason(data) {
 }
 
 const LAST_RESULT_KEY = "hipporag_last_result";
+const PENDING_KEY = "hipporag_pending_question";
 
 function saveLastResult(data) {
   // F-UX: последний ответ переживает уход на «Статус»/перезагрузку вкладки.
-  safeSet(sessionStorage, LAST_RESULT_KEY, JSON.stringify(historyEntry(data)));
+  safeSet(localStorage, LAST_RESULT_KEY, JSON.stringify(historyEntry(data)));
 }
 
 function restoreLastResult() {
-  const raw = safeGet(sessionStorage, LAST_RESULT_KEY);
+  const raw = safeGet(localStorage, LAST_RESULT_KEY) || safeGet(sessionStorage, LAST_RESULT_KEY);
   if (!raw) return;
   try {
     const entry = JSON.parse(raw);
@@ -600,6 +603,11 @@ async function submitQuestion() {
 
   clearError();
   setLoading(true);
+  safeSet(localStorage, PENDING_KEY, JSON.stringify({
+    question,
+    mode: getSelectedMode(),
+    top_k: 5,
+  }));
   try {
     const data = await fetchJson("/api/ask", {
       method: "POST",
@@ -811,10 +819,30 @@ function bindEvents() {
 
 async function init() {
   cacheElements();
-  state.apiKey = safeGet(sessionStorage, API_KEY_STORAGE) || "";
+  state.apiKey =
+    safeGet(sessionStorage, API_KEY_STORAGE) ||
+    safeGet(localStorage, API_KEY_STORAGE) ||
+    "";
   state.history = loadHistory();
   renderHistory();
   restoreLastResult();
+  const pendingRaw = safeGet(localStorage, PENDING_KEY);
+  if (pendingRaw) {
+    try {
+      const pending = JSON.parse(pendingRaw);
+      if (pending.question && elements.question) {
+        elements.question.value = pending.question;
+        if (pending.mode) {
+          const radio = document.querySelector(`input[name="mode"][value="${pending.mode}"]`);
+          if (radio) radio.checked = true;
+        }
+        safeSet(localStorage, PENDING_KEY, "");
+        submitQuestion();  // авто-повтор незавершённого запроса (F-UX)
+      }
+    } catch {
+      /* битая запись — пропускаем */
+    }
+  }
   bindEvents();
   updateKeyButton();
 
