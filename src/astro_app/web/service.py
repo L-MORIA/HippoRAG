@@ -173,13 +173,35 @@ def _metadata_at(store: Any, index: int) -> Dict[str, Any]:
     return dict(metadata) if isinstance(metadata, dict) else {}
 
 
+_TEXT_INDEX_CACHE_KEY: Optional[Tuple[int, int]] = None
+_TEXT_INDEX_CACHE: Optional[Dict[str, int]] = None
+
+
+def _text_to_index(store: Any, texts: List[str]) -> Dict[str, int]:
+    """Словарь «текст чанка → позиция» (F-12).
+
+    Раньше здесь был ``texts.index(text)`` — линейный проход по всем чанкам
+    на каждый фрагмент выдачи. Кэш ключуется store и длиной: после
+    reindex/restore каталог подменяется или меняется длина, и словарь
+    пересобирается. Коллизии дубликатов неважны: достаточно любой позиции —
+    метаданные дубликатов совпадают.
+    """
+    global _TEXT_INDEX_CACHE_KEY, _TEXT_INDEX_CACHE
+    key = (id(store), len(texts))
+    if _TEXT_INDEX_CACHE_KEY == key and _TEXT_INDEX_CACHE is not None:
+        return _TEXT_INDEX_CACHE
+    mapping = {text: index for index, text in enumerate(texts)}
+    _TEXT_INDEX_CACHE_KEY = key
+    _TEXT_INDEX_CACHE = mapping
+    return mapping
+
+
 def _metadata_for_text(hipporag: Any, text: str) -> Dict[str, Any]:
     """Найти метаданные чанка по точному тексту (режимы 1/2/5)."""
     store = getattr(hipporag, "chunk_embedding_store", None)
     texts = getattr(store, "texts", None) or []
-    try:
-        index = texts.index(text)
-    except ValueError:
+    index = _text_to_index(store, texts).get(text)
+    if index is None:
         return {}
     return _metadata_at(store, index)
 
