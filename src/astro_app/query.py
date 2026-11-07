@@ -182,6 +182,16 @@ def _is_meta_reformulation(content: str) -> bool:
     return any(marker in low for marker in _META_REFORMULATION_MARKERS)
 
 
+def _llm_timeout() -> int:
+    """Единый бюджет ожидания LLM (F-6); LLM_TIMEOUT переопределяет."""
+    import os
+
+    try:
+        return int(os.getenv("LLM_TIMEOUT", "90"))
+    except ValueError:
+        return 90
+
+
 def reformulate_query(hipporag, query):
     """Улучшить запрос через LLM (прямой вызов LM Studio API)."""
 
@@ -230,7 +240,12 @@ def reformulate_query(hipporag, query):
             "max_tokens": 2048,
             "temperature": 0,
         }
-        r = httpx.post(f"{api_url}/v1/chat/completions", json=payload, timeout=300)
+        # F-6: единый бюджет LLM_TIMEOUT (по умолчанию 90 c), а не 300 c
+        r = httpx.post(
+            f"{api_url}/v1/chat/completions",
+            json=payload,
+            timeout=_llm_timeout(),
+        )
         if r.status_code == 200:
             data = r.json()
             msg = data["choices"][0]["message"]

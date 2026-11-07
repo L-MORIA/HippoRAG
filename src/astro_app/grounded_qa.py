@@ -109,12 +109,24 @@ def used_sources(fragments: Sequence[Fragment], citation_ids: Sequence[int]) -> 
     return "\n".join(lines)
 
 
+def _default_llm_timeout() -> int:
+    """Единый бюджет ожидания LLM (F-6); LLM_TIMEOUT переопределяет."""
+    import os
+
+    try:
+        return int(os.getenv("LLM_TIMEOUT", "90"))
+    except ValueError:
+        return 90
+
+
 def lmstudio_chat(
     messages: List[Dict[str, str]],
     max_tokens: int = 2048,
     temperature: float = 0.15,
-    timeout: int = 300,
+    timeout: Optional[int] = None,
 ) -> str:
+    if timeout is None:
+        timeout = _default_llm_timeout()
     """Запрос к LM Studio; при недоступности возвращает пустую строку."""
     import httpx
 
