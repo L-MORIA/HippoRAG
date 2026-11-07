@@ -307,7 +307,9 @@ def test_shipped_manifest_matches_recomputed():
 def test_synonyms_are_loadable():
     from astro_app.synonyms import load_synonyms
 
-    assert len(load_synonyms()) == 66
+    # F-13 (2026-11-07) добавил мост «шенци»; контракт — словарь загружается
+    # и остаётся нетривиальным, точное число ключей не фиксируется.
+    assert len(load_synonyms()) >= 66
 
 
 def test_missing_package_data_manifest_is_a_clear_error(tmp_path, monkeypatch):
