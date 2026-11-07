@@ -195,7 +195,11 @@ def reformulate_query(hipporag, query):
             print("  ⚠️ Переформулировка запроса через LLM недоступна.")
             print("  ⚠️ Поиск продолжается без переформулировки.\n")
             return query
-    except (httpx.ConnectError, httpx.TimeoutException):
+    except httpx.HTTPError:
+        # F-4: httpx.HTTPError покрывает RemoteProtocolError, ReadError,
+        # PoolTimeout и пр. — весь класс сетевых сбоев при перезапуске LM
+        # Studio. Узкая пара (ConnectError, TimeoutException) пропускала
+        # остальные, и они уходили исключением наверх → 500 в режиме 1.
         print("\n  ⚠️ LM Studio не запущен или не отвечает.")
         print("  ⚠️ Переформулировка запроса через LLM невозможна.")
         print("  ⚠️ Чтобы включить — запустите LM Studio и загрузите модель.")
