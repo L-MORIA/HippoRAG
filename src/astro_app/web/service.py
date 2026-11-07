@@ -482,14 +482,18 @@ def retrieve(
         fragments.append(fragment)
 
     fragments = fragments[:top_k]
-    clarification = _author_clarification_fragment(question)
-    if clarification is not None:
-        # Уточнение автора идёт добавкой после топ-k, чтобы не вытеснять
-        # фрагменты книги: модель получает его отдельным последним пунктом.
-        fragments.append(clarification)
-    gua_table = _gua_table_fragment(question)
-    if gua_table is not None:
-        fragments.append(gua_table)
+    # Инъекции (таблица гуа по дате, уточнение автора) — прямой ответ на
+    # вопрос: идут первыми, книга — после. Пользователь видит полезное
+    # сверху, а модель цитирует ближайшие номера.
+    injects = [
+        f
+        for f in (
+            _gua_table_fragment(question),
+            _author_clarification_fragment(question),
+        )
+        if f is not None
+    ]
+    fragments = injects + fragments
 
     return RetrievalResult(
         fragments=fragments,
