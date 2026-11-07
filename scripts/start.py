@@ -19,8 +19,12 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import os
+import socket
 import subprocess
 import sys
+import threading
+import time
+import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -155,6 +159,40 @@ def default_log_file() -> Path:
     return ROOT / "outputs" / "logs" / "server.log"
 
 
+
+
+def _port_already_serving(host: str, port: int) -> bool:
+    """F-UX: сервер уже работает? Короткая проверка сокета."""
+    try:
+        with socket.create_connection((host, port), timeout=1.5):
+            return True
+    except OSError:
+        return False
+
+
+def _open_browser_when_ready(host: str, port: int, timeout_s: float = 240.0) -> None:
+    """Ждёт готовности сервера и открывает веб-UI в браузере."""
+
+    import http.client
+
+    url = f"http://{host}:{port}/"
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        try:
+            connection = http.client.HTTPConnection(host, port, timeout=2)
+            connection.request("GET", "/")
+            response = connection.getresponse()
+            connection.close()
+            if response.status == 200:
+                print(f"[start] Сервер готов — открываю {url}")
+                webbrowser.open(url)
+                return
+        except OSError:
+            pass
+        time.sleep(1.5)
+    print("[start] Сервер не ответил вовремя — откройте вручную:", url)
+
+
 def build_uvicorn_command(host: str, port: int, *, reload: bool = False) -> List[str]:
     """Собирает команду запуска uvicorn."""
     command = [
@@ -245,6 +283,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="запустить uvicorn с --reload (для разработки)",
     )
+    parser.add_argument(
+        "--open-browser",
+        action="store_true",
+        help="открыть веб-UI в браузере, как только сервер ответит",
+    )
     return parser
 
 
@@ -317,11 +360,24 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     log_file = default_log_file()
     print(f"[start] Журнал сервера: {log_file}")
 
+    if args.open_browser and _port_already_serving(host, port):
+        url = f"http://{host}:{port}/"
+        print(f"[start] Сервер уже запущен — открываю {url}")
+        webbrowser.open(url)
+        return 0
+
     command = build_uvicorn_command(host, port, reload=args.reload)
     env = os.environ.copy()
     env.setdefault("HIPPORAG_LOG_FILE", str(log_file))
     print("[start] Запуск:", " ".join(command))
     print(f"[start] UI: http://{host}:{port}/  ·  API docs: http://{host}:{port}/docs")
+    if args.open_browser:
+        threading.Thread(
+            target=_open_browser_when_ready,
+            args=(host, port),
+            daemon=True,
+            name="open-browser",
+        ).start()
     try:
         return subprocess.call(command, cwd=str(ROOT), env=env)
     except KeyboardInterrupt:
