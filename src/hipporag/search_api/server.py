@@ -1,6 +1,7 @@
 import logging
 import os
 import secrets
+import threading
 import time
 from collections import deque
 from contextlib import asynccontextmanager
@@ -176,6 +177,9 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Ошибка инициализации HippoRAG: {str(e)}")
         raise
+    # F-7: прогрев (страничный индекс BM25, RU cross-encoder) в фоне —
+    # иначе первый вопрос пользователя попадает в JIT-загрузку моделей.
+    threading.Thread(target=_warmup, name="warmup", daemon=True).start()
     yield
 
 
@@ -187,6 +191,32 @@ app = FastAPI(
     redoc_url="/redoc",
     lifespan=lifespan,
 )
+
+
+WARMUP: dict = {"ready": False, "error": None, "duration_ms": None}
+
+
+def _warmup() -> None:
+    """F-7: прогреть страницы/BM25/RU-CE до первого вопроса пользователя.
+
+    Работает в daemon-потоке после инициализации индекса. Любая ошибка
+    прогрева не поднимает сервер: ready выставляется с error, чтобы /health
+    показал деградацию, а не бесконечное «не готов».
+    """
+    started = time.perf_counter()
+    try:
+        from astro_app.modes.bm25_hybrid import search_bm25_hybrid_ru_pages
+
+        search_bm25_hybrid_ru_pages(hipporag, "фэншуй", top_k=1)
+    except Exception as error:  # noqa: BLE001
+        WARMUP["error"] = f"{type(error).__name__}: {error}"[:200]
+        logger.warning("Прогрев не удался: %s", WARMUP["error"])
+    else:
+        WARMUP["error"] = None
+    finally:
+        WARMUP["duration_ms"] = round((time.perf_counter() - started) * 1000, 1)
+        WARMUP["ready"] = True
+        logger.info("Прогрев завершён за %s мс (error=%s)", WARMUP["duration_ms"], WARMUP["error"])
 
 
 def is_public_ui_path(path: str) -> bool:
@@ -322,6 +352,7 @@ async def health_check():
 
     return HealthResponse(
         status="healthy",
+        ready=WARMUP["ready"],
         version="1.0.0",
         uptime=uptime_str,
         chunks=chunk_count,

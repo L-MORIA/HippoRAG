@@ -157,6 +157,10 @@ class HealthResponse(BaseModel):
         default="idle", description="Текущая операция с индексом (idle/running/error)"
     )
     documents: int = Field(default=0, description="Количество документов в индексе")
+    ready: bool = Field(
+        default=False,
+        description="F-7: прогрет ли сервер (страничный индекс и cross-encoder)",
+    )
     llm_model: Optional[str] = Field(default=None, description="LLM из манифеста индекса")
     embedding_model: Optional[str] = Field(
         default=None, description="Модель эмбеддингов из манифеста индекса"
