@@ -60,6 +60,7 @@ function cacheElements() {
     confidence: $("#confidence-badge"),
     latency: $("#latency"),
     abstainBanner: $("#abstain-banner"),
+    refusalReason: $("#refusal-reason"),
     answer: $("#answer"),
     reformulated: $("#reformulated"),
     exportMd: $("#export-md"),
@@ -447,6 +448,32 @@ function resetFeedback() {
   if (elements.feedbackStatus) elements.feedbackStatus.textContent = "";
 }
 
+// F-8: причина отказа — из grounding_errors, а не общий текст для всех случаев.
+const REFUSAL_REASONS = {
+  no_fragments:
+    "По запросу не нашлось подходящих фрагментов — в книгах нет этого факта. Попробуйте переформулировать вопрос.",
+  llm_unavailable_or_empty:
+    "Языковая модель временно недоступна или ответила пустотой — попробуйте ещё раз через минуту.",
+  answer_not_verified:
+    "Ответ не удалось проверить по источникам — покажите фрагменты ниже и перепроверьте вручную.",
+};
+
+function renderRefusalReason(data) {
+  if (!elements.refusalReason) return;
+  const errors = Array.isArray(data.grounding_errors) ? data.grounding_errors : [];
+  if (!data.abstained || errors.length === 0) {
+    elements.refusalReason.classList.add("hidden");
+    elements.refusalReason.textContent = "";
+    return;
+  }
+  const known = errors.find((code) => REFUSAL_REASONS[code]);
+  const reason = known
+    ? REFUSAL_REASONS[known]
+    : "Ответ не удалось проверить по источникам — покажите фрагменты ниже и перепроверьте вручную.";
+  elements.refusalReason.textContent = `Причина: ${reason}`;
+  elements.refusalReason.classList.remove("hidden");
+}
+
 function renderResult(data) {
   state.current = data;
   elements.result.classList.remove("hidden");
@@ -463,6 +490,7 @@ function renderResult(data) {
   )}`;
 
   elements.abstainBanner.classList.toggle("hidden", !data.abstained);
+  renderRefusalReason(data);
   elements.reformulated.classList.toggle(
     "hidden",
     !data.reformulated_query || data.reformulated_query === data.query,
