@@ -474,6 +474,28 @@ function renderRefusalReason(data) {
   elements.refusalReason.classList.remove("hidden");
 }
 
+const LAST_RESULT_KEY = "hipporag_last_result";
+
+function saveLastResult(data) {
+  // F-UX: последний ответ переживает уход на «Статус»/перезагрузку вкладки.
+  safeSet(sessionStorage, LAST_RESULT_KEY, JSON.stringify(historyEntry(data)));
+}
+
+function restoreLastResult() {
+  const raw = safeGet(sessionStorage, LAST_RESULT_KEY);
+  if (!raw) return;
+  try {
+    const entry = JSON.parse(raw);
+    if (!entry.answer && !entry.abstained) return;
+    renderResult(entry);
+    if (elements.question && !elements.question.value && entry.query) {
+      elements.question.value = entry.query;
+    }
+  } catch {
+    /* повреждённая запись — молча пропускаем */
+  }
+}
+
 function renderResult(data) {
   state.current = data;
   elements.result.classList.remove("hidden");
@@ -792,6 +814,7 @@ async function init() {
   state.apiKey = safeGet(sessionStorage, API_KEY_STORAGE) || "";
   state.history = loadHistory();
   renderHistory();
+  restoreLastResult();
   bindEvents();
   updateKeyButton();
 
