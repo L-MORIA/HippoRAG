@@ -58,6 +58,23 @@ def _answer_question(request: AskRequest):
         )
 
 
+def _http_error_for(error: Exception) -> HTTPException:
+    """F-2: HTTP-ответ по классу сбоя.
+
+    Сетевые/таймаутные ошибки — 503 «временно недоступно», остальные — 500;
+    наружу имя класса исключения, но не полный текст и не трейсбек.
+    """
+    if observability.is_timeout_error(error) or isinstance(error, (ConnectionError, TimeoutError)):
+        return HTTPException(
+            status_code=503,
+            detail=f"Сервис поиска временно недоступен ({type(error).__name__})",
+        )
+    return HTTPException(
+        status_code=500,
+        detail=f"Внутренняя ошибка поиска ({type(error).__name__})",
+    )
+
+
 @app.get("/ui/config", response_model=UiConfig, tags=["ui"])
 async def ui_config() -> UiConfig:
     """Публичная конфигурация UI: режимы и факт обязательности ключа."""
@@ -98,7 +115,7 @@ async def ask(request: AskRequest) -> AskResponse:
             error=str(error)[:300],
         )
         logger.exception("Ошибка веб-поиска: mode=%s", request.mode)
-        raise HTTPException(status_code=500, detail="Внутренняя ошибка поиска")
+        raise _http_error_for(error)
 
     duration_ms = observability.elapsed_ms(started)
     retrieval_ms = round(answer.retrieval_time * 1000, 1)

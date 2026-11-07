@@ -29,6 +29,11 @@ _LOG_FORMAT = "%(asctime)s %(levelname)-7s %(name)s: %(message)s"
 #: попадали в файл, обработчик добавляется и им.
 _UVICORN_LOGGERS = ("uvicorn", "uvicorn.error", "uvicorn.access")
 
+#: Структурные события H2-4 (ask_failed, answer_empty, …). У этого логгера
+#: propagate=False и свой StreamHandler, поэтому файловый (F-1) добавляется
+#: ему напрямую — иначе события не попадают в журнал (F-2).
+_EVENTS_LOGGER_NAME = "hipporag.events"
+
 
 def _resolve(path: Union[str, os.PathLike[str], None]) -> Optional[Path]:
     configured = path or os.getenv(LOG_FILE_ENV)
@@ -80,7 +85,7 @@ def configure_file_logging(
     else:
         root.addHandler(handler)
 
-    for name in _UVICORN_LOGGERS:
+    for name in (*_UVICORN_LOGGERS, _EVENTS_LOGGER_NAME):
         logger = logging.getLogger(name)
         if _has_handler(logger, log_path):
             continue
