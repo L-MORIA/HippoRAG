@@ -269,6 +269,16 @@ class IndexLifecycle:
                 raise RuntimeError("Нельзя делать бэкап во время другой операции с индексом")
             return self._create_backup(label)
 
+    def _openie_cache_files(self) -> List[Path]:
+        """Кэш OpenIE (F-11): лежит РЯДОМ с каталогом индекса, а не внутри.
+
+        Если его не включать в бэкап, restore откатывает чанки/граф, но кэш
+        остаётся новым — рассинхрон «1370 результатов на 1369 чанков».
+        """
+        if self.index_dir.parent != self.index_dir:
+            return sorted(self.index_dir.parent.glob("openie_results_ner_*.json"))
+        return []
+
     def _create_backup(self, label: Optional[str] = None) -> Dict[str, Any]:
         if not self.index_dir.exists():
             raise FileNotFoundError(f"Каталог индекса не найден: {self.index_dir}")
@@ -290,6 +300,13 @@ class IndexLifecycle:
                 bundle.write(path, arcname)
                 files += 1
                 total_bytes += path.stat().st_size
+            # F-11: кэш OpenIE едет в архив под служебным каталогом, чтобы
+            # restore мог вернуть его на уровень выше индекса.
+            for openie_path in self._openie_cache_files():
+                arcname = "_openie_cache/" + openie_path.name
+                bundle.write(openie_path, arcname)
+                files += 1
+                total_bytes += openie_path.stat().st_size
 
         problems = self._verify_archive(archive)
         if problems:
@@ -378,6 +395,15 @@ class IndexLifecycle:
                     shutil.rmtree(old_dir)
                 self.index_dir.rename(old_dir)
             staging.rename(self.index_dir)
+
+            # F-11: кэш OpenIE из архива возвращается на уровень выше каталога
+            # индекса (там, где его ждёт HippoRAG) — иначе после restore
+            # оставался «новый» кэш поверх «старого» индекса (рассинхрон).
+            openie_staging = self.index_dir / "_openie_cache"
+            if openie_staging.is_dir():
+                for openie_file in openie_staging.glob("openie_results_ner_*.json"):
+                    shutil.copy2(openie_file, self.index_dir.parent / openie_file.name)
+                shutil.rmtree(openie_staging, ignore_errors=True)
 
             try:
                 if self._reload_hipporag is not None:

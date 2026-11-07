@@ -372,3 +372,46 @@ def test_restore_resets_page_index_cache(index_env, monkeypatch):
     lifecycle.restore(backup["name"])
 
     assert resets == [True]
+
+
+# ── кэш OpenIE в backup/restore (F-11) ─────────────────────────────────────
+
+
+def _openie_file(index_dir, content: str):
+    openie = index_dir.parent / "openie_results_ner_test-llm.json"
+    openie.write_text(content, encoding="utf-8")
+    return openie
+
+
+def test_backup_includes_openie_cache(index_env, tmp_path):
+    lifecycle, _, index_dir = index_env
+    _openie_file(index_dir, '{"docs": []}')
+    result = lifecycle.backup(label="openie-check")
+    import zipfile
+
+    with zipfile.ZipFile(result["path"]) as bundle:
+        names = bundle.namelist()
+    assert "_openie_cache/openie_results_ner_test-llm.json" in names
+
+
+def test_restore_returns_openie_cache(index_env):
+    from astro_app import index_lifecycle as il
+
+    lifecycle, _, index_dir = index_env
+    openie = _openie_file(index_dir, '{"docs": ["старый кэш"]}')
+    backup = lifecycle.backup(label="openie-restore")
+
+    # текущий кэш «новее» бэкапа — restore должен вернуть версию из копии
+    openie.write_text('{"docs": ["новый кэш"]}', encoding="utf-8")
+    resets = []
+    original = il._reset_page_cache
+    monkey = lambda: resets.append(True)
+    il._reset_page_cache = monkey
+    try:
+        lifecycle.restore(backup["name"])
+    finally:
+        il._reset_page_cache = original
+
+    assert "старый кэш" in openie.read_text(encoding="utf-8")
+    assert resets == [True]
+    assert not (index_dir / "_openie_cache").exists()
