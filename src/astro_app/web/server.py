@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
@@ -39,6 +39,20 @@ logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 app = api_server.app
 feedback_store = FeedbackStore(os.getenv("FEEDBACK_PATH"))
+
+
+@app.middleware("http")
+async def no_cache_static(request: Request, call_next):
+    """F-UX: статика (/ui/*) всегда перепроверяется браузером.
+
+    Без этого заголовка браузер держит старый app.js неделями и после правок
+    интерфейса показывает «старый интерфейс» при актуальном сервере.
+    """
+    response = await call_next(request)
+    if request.url.path.startswith("/ui"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
 
 #: Пайплайн ответа не потокобезопасен: igraph/PPR, эмбеддинги на GPU и ленивые
 #: LLM-клиенты используют общее состояние HippoRAG. Один лок на все режимы —
