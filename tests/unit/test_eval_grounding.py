@@ -69,8 +69,9 @@ def test_golden_file_has_planned_composition():
 
     assert errors == []
     assert warnings == []
-    assert len(golden.items) == 36
-    assert len(golden.answerable) - len(golden.borderline) == 18
+    # F-10: набор вырос на answerable-кейс «гуа 5» (split=out_of_tune)
+    assert len(golden.items) == 37
+    assert len(golden.answerable) - len(golden.borderline) == 19
     assert len(golden.borderline) == 5
     assert len(golden.unanswerable) == 13
 
@@ -494,7 +495,8 @@ def test_cli_stub_legacy_fails_citation_thresholds(tmp_path):
     assert code == 0
     report = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
     assert report["metrics"]["citation_precision"] == 0.0
-    assert report["metrics"]["answer_accuracy"] == 1.0
+    # F-10: out-of-tune «гуа 5» стаб дословно не отвечает
+    assert report["metrics"]["answer_accuracy"] >= 0.9
 
 
 def test_page_recall_at_5_counts_question_when_gold_page_retrieved():

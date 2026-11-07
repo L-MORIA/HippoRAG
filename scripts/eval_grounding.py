@@ -93,7 +93,7 @@ _REQUIRED_FIELDS = {
     "gold_sources",
     "notes",
 }
-_OPTIONAL_FIELDS = {"borderline", "gold_terms"}
+_OPTIONAL_FIELDS = {"borderline", "gold_terms", "split"}
 _ALLOWED_FIELDS = _REQUIRED_FIELDS | _OPTIONAL_FIELDS
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{2,64}$")
 _MARKER_RE = re.compile(r"\[\s*([0-9,\s]+?)\s*\]")
@@ -155,6 +155,7 @@ class GoldenQuestion:
     gold_terms: List[str] = field(default_factory=list)
     notes: str = ""
     borderline: bool = False
+    split: str = "in_tune"  # F-10: in_tune — участвовал в настройке системы
 
 
 @dataclass
@@ -278,6 +279,9 @@ def parse_golden_entry(raw: Any, where: str) -> GoldenQuestion:
     notes = raw.get("notes", "")
     if not isinstance(notes, str):
         raise GoldenSetError(f"{where}: notes должен быть строкой")
+    split = raw.get("split", "in_tune")
+    if split not in ("in_tune", "out_of_tune"):
+        raise GoldenSetError(f"{where}: split должен быть in_tune|out_of_tune")
     borderline = raw.get("borderline", False)
     if not isinstance(borderline, bool):
         raise GoldenSetError(f"{where}: borderline должен быть bool")
@@ -314,6 +318,7 @@ def parse_golden_entry(raw: Any, where: str) -> GoldenQuestion:
         gold_terms=terms,
         notes=notes.strip(),
         borderline=borderline,
+        split=split,
     )
 
 
@@ -635,6 +640,7 @@ def evaluate(
             "id": question.id,
             "answerable": question.answerable,
             "borderline": question.borderline,
+            "split": question.split,
             "answered": answered,
             "abstained": not answered,
             "citations": len(cited),
@@ -731,6 +737,19 @@ def evaluate(
         "p50_latency_ms": _percentile(latencies, 0.5),
         "p95_latency_ms": _percentile(latencies, 0.95),
     }
+    out_rows = [
+        row
+        for row in rows
+        if row.get("split") == "out_of_tune" and row["answerable"] and row["answered"]
+    ]
+    if out_rows:
+        precisions = [row["citation_precision"] for row in out_rows if row.get("citation_precision") is not None]
+        recalls = [row["citation_recall"] for row in out_rows if row.get("citation_recall") is not None]
+        metrics["out_of_tune"] = {
+            "n_answered_answerable": len(out_rows),
+            "citation_precision": _mean(precisions),
+            "citation_recall": _mean(recalls),
+        }
     return {"metrics": metrics, "questions": rows}
 
 
