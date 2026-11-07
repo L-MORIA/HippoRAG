@@ -10,6 +10,7 @@ UI не дублирует логику поиска: он вызывает те
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -176,6 +177,9 @@ def _metadata_at(store: Any, index: int) -> Dict[str, Any]:
 _TEXT_INDEX_CACHE_KEY: Optional[Tuple[int, int]] = None
 _TEXT_INDEX_CACHE: Optional[Dict[str, int]] = None
 _CLARIFICATIONS_CACHE: Optional[List[Dict[str, Any]]] = None
+_GUA_TABLE_CACHE: Optional[Dict[str, Any]] = None
+_GUA_DATE_RE = re.compile(r"(0[1-9]|[12]\d|3[01])\.(0[1-9]|1[0-2])\.((?:19|20)\d{2})")
+_GUA_YEAR_RE = re.compile(r"(?<!\d)((?:19|20)\d{2})(?!\d)")
 
 
 def _text_to_index(store: Any, texts: List[str]) -> Dict[str, int]:
@@ -205,6 +209,114 @@ def _metadata_for_text(hipporag: Any, text: str) -> Dict[str, Any]:
     if index is None:
         return {}
     return _metadata_at(store, index)
+
+
+def _load_gua_table() -> Dict[str, Any]:
+    """Таблица «даты → число гуа» (gua_year_table.json из package data).
+
+    Транскрибация таблицы на стр. 9-12 «Эзотерического фэншуя» (в текстовом
+    слое PDF её нет — она отрисована изображением). Файл необязателен.
+    """
+    global _GUA_TABLE_CACHE
+    if _GUA_TABLE_CACHE is not None:
+        return _GUA_TABLE_CACHE
+    from importlib import resources
+
+    try:
+        with (
+            resources.files("astro_app.data")
+            .joinpath("gua_year_table.json")
+            .open(encoding="utf-8") as handle
+        ):
+            _GUA_TABLE_CACHE = json.load(handle)
+    except Exception:
+        _GUA_TABLE_CACHE = {"rows": []}
+    return _GUA_TABLE_CACHE
+
+
+def _gua_table_fragment(question: str) -> Optional[RetrievedFragment]:
+    """F-13d: строка таблицы «год → число гуа» для запросов с датой рождения.
+
+    Таблица книги существует только картинкой, в текстовом корпусе её нет —
+    без инъекции модель физически не может увидеть ответ. В фрагмент идут
+    строка, покрывающая дату/год запроса, и предыдущая (граница китайского
+    Нового года). Только для запросов, где есть «гуа».
+    """
+    q_lower = (question or "").lower()
+    if "гуа" not in q_lower:
+        return None
+
+    rows = _load_gua_table().get("rows") or []
+    if not rows:
+        return None
+
+    from datetime import date, timedelta
+
+    target_date: Optional[date] = None
+    date_match = _GUA_DATE_RE.search(q_lower)
+    if date_match:
+        target_date = date(
+            int(date_match.group(3)), int(date_match.group(2)), int(date_match.group(1))
+        )
+    else:
+        year_match = _GUA_YEAR_RE.search(q_lower)
+        if year_match:
+            target_date = date(int(year_match.group(1)), 7, 1)
+
+    if target_date is None:
+        return None
+
+    def row_for(day: date) -> Optional[Dict[str, Any]]:
+        for row in rows:
+            if row["from"] <= day.isoformat() <= row["to"]:
+                return row
+        return None
+
+    covering = row_for(target_date)
+    if covering is None:
+        return None
+
+    # Пол из запроса: считаем подстановку в коде — модель получает готовый
+    # факт («для даты X женщина: гуа 5») вместо таблицы, в которой ей нужно
+    # самой делать lookup (gemma на таком отказывалась).
+    gender_line = ""
+    if re.search(r"женщин|родилась|девушк", q_lower):
+        gender_line = (
+            f"Для даты рождения {target_date.strftime('%d.%m.%Y')} (женщина): "
+            f"число гуа — {covering['gua_f']}."
+        )
+    elif re.search(r"мужчин|родился|парн", q_lower):
+        gender_line = (
+            f"Для даты рождения {target_date.strftime('%d.%m.%Y')} (мужчина): "
+            f"число гуа — {covering['gua_m']}."
+        )
+    lines = [
+        "Таблица чисел гуа (И. В. Максимова, «Эзотерический фэншуй», стр. 9-12): "
+        f"период {covering['from']} — {covering['to']} ({covering['animal']}): "
+        f"число гуа мужчин — {covering['gua_m']}, число гуа женщин — {covering['gua_f']}."
+    ]
+    if gender_line:
+        lines.insert(0, gender_line)
+    # Граница китайского Нового года: рождение до февраля относится к
+    # предыдущей строке — показываем её тоже.
+    prev_date = target_date - timedelta(days=45)
+    if prev_date.year < target_date.year or prev_date.isoformat() < covering["from"]:
+        previous = row_for(prev_date)
+        if previous is not None and previous is not covering:
+            lines.append(
+                f"Предыдущий период {previous['from']} — {previous['to']} "
+                f"({previous['animal']}): гуа мужчин — {previous['gua_m']}, "
+                f"женщин — {previous['gua_f']}. При рождении до даты начала "
+                "текущего периода (китайский Новый год) действует предыдущая строка."
+            )
+    return RetrievedFragment(
+        text="\n".join(lines),
+        doc_title="Таблица чисел гуа, «Эзотерический фэншуй», стр. 9-12",
+        page_num=0,
+        section="таблица из книги",
+        source_file="book_table",
+        score=0.0,
+    )
 
 
 def _load_author_clarifications() -> List[Dict[str, Any]]:
@@ -375,6 +487,9 @@ def retrieve(
         # Уточнение автора идёт добавкой после топ-k, чтобы не вытеснять
         # фрагменты книги: модель получает его отдельным последним пунктом.
         fragments.append(clarification)
+    gua_table = _gua_table_fragment(question)
+    if gua_table is not None:
+        fragments.append(gua_table)
 
     return RetrievalResult(
         fragments=fragments,

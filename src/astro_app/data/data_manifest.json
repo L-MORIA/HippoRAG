@@ -4,6 +4,10 @@
       "entries": 1,
       "sha256": "3f31951bec3af56615e78dcebf12cbe00a3bc7c98849dfea4f93d07fc2968dfb"
     },
+    "gua_year_table.json": {
+      "entries": 2,
+      "sha256": "2a3ddee6dfa798b2a1d7038e98bfd39f51b31c0af992254776acaabc4a1fa8c7"
+    },
     "synonyms.json": {
       "entries": 67,
       "sha256": "5b3e7bf73399afdd50e00f25b923ea0824d9f05a855524a3f91b87d392e17054"
