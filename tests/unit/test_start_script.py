@@ -254,6 +254,43 @@ def test_main_uses_app_host_and_port_from_env(monkeypatch, tmp_path):
     assert captured["cwd"] == str(tmp_path)
 
 
+def test_main_sets_default_log_file(monkeypatch, tmp_path, capsys):
+    prepare_main_env(monkeypatch, tmp_path)
+    monkeypatch.delenv("HIPPORAG_LOG_FILE", raising=False)
+    monkeypatch.setattr(start.importlib.util, "find_spec", lambda name: object())
+    captured = {}
+
+    def fake_call(command, cwd=None, env=None):
+        captured["env"] = env
+        return 0
+
+    monkeypatch.setattr(start.subprocess, "call", fake_call)
+
+    code = start.main(["--skip-lm-check"])
+
+    expected = tmp_path / "outputs" / "logs" / "server.log"
+    assert code == 0
+    assert captured["env"]["HIPPORAG_LOG_FILE"] == str(expected)
+    assert str(expected) in capsys.readouterr().out
+
+
+def test_main_keeps_explicit_log_file(monkeypatch, tmp_path):
+    prepare_main_env(monkeypatch, tmp_path)
+    explicit = tmp_path / "custom" / "app.log"
+    monkeypatch.setenv("HIPPORAG_LOG_FILE", str(explicit))
+    monkeypatch.setattr(start.importlib.util, "find_spec", lambda name: object())
+    captured = {}
+
+    def fake_call(command, cwd=None, env=None):
+        captured["env"] = env
+        return 0
+
+    monkeypatch.setattr(start.subprocess, "call", fake_call)
+
+    assert start.main(["--skip-lm-check"]) == 0
+    assert captured["env"]["HIPPORAG_LOG_FILE"] == str(explicit)
+
+
 def test_main_refuses_non_loopback_without_key(monkeypatch, tmp_path, capsys):
     prepare_main_env(monkeypatch, tmp_path, api_key_required="1")
 

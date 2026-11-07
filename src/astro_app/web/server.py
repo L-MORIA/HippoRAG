@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +18,7 @@ from typing import List
 from fastapi import HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from hipporag.search_api import observability
 from hipporag.search_api import server as api_server
@@ -37,6 +39,23 @@ logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 app = api_server.app
 feedback_store = FeedbackStore(os.getenv("FEEDBACK_PATH"))
+
+#: Пайплайн ответа не потокобезопасен: igraph/PPR, эмбеддинги на GPU и ленивые
+#: LLM-клиенты используют общее состояние HippoRAG. Один лок на все режимы —
+#: параллельные запросы выполняются по очереди, а не портят структуры графа.
+#: Блокировка берётся в рабочем потоке: event loop при этом остаётся свободен.
+PIPELINE_LOCK = threading.Lock()
+
+
+def _answer_question(request: AskRequest):
+    """Выполняет пайплайн под локом (вызывается из threadpool)."""
+    with PIPELINE_LOCK:
+        return service.answer_question(
+            api_server.hipporag,
+            request.question,
+            request.mode,
+            top_k=request.top_k,
+        )
 
 
 @app.get("/ui/config", response_model=UiConfig, tags=["ui"])
@@ -65,12 +84,7 @@ async def ask(request: AskRequest) -> AskResponse:
 
     started = time.perf_counter()
     try:
-        answer = service.answer_question(
-            api_server.hipporag,
-            request.question,
-            request.mode,
-            top_k=request.top_k,
-        )
+        answer = await run_in_threadpool(_answer_question, request)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except Exception as error:

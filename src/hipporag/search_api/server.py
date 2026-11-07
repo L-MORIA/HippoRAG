@@ -15,6 +15,7 @@ from astro_app.index_lifecycle import IndexLifecycle
 
 from ..HippoRAG import HippoRAG
 from ..utils.config_utils import BaseConfig
+from .logging_setup import configure_file_logging
 from .models import (
     BackupInfo,
     BackupListResponse,
@@ -52,6 +53,8 @@ from .observability import (
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
+# H-500: traceback не должен исчезать вместе с терминалом/процессом.
+_LOG_PATH = configure_file_logging()
 logger = logging.getLogger(__name__)
 
 # Глобальные переменные
@@ -129,6 +132,8 @@ def _reload_hipporag() -> HippoRAG:
 async def lifespan(app: FastAPI):
     """Инициализация при запуске сервера: конфиг из env, проверка непустоты индекса."""
     global hipporag, index_lifecycle, _app_config
+    if _LOG_PATH is not None:
+        logger.info("Файловый журнал сервера: %s", _LOG_PATH)
     if API_KEY_REQUIRED and not API_KEY:
         raise RuntimeError(
             "API_KEY обязателен (API_KEY_REQUIRED=1 по умолчанию), но не задан. "

@@ -142,6 +142,19 @@ def decide_api_key(host: str, api_key: Optional[str], required: bool) -> ApiKeyD
     return ApiKeyDecision(False, False, "Для адреса вне loopback нужен API_KEY")
 
 
+def default_log_file() -> Path:
+    """Путь файлового журнала сервера по умолчанию.
+
+    ``HIPPORAG_LOG_FILE`` переопределяет путь; иначе пишем в
+    ``outputs/logs/server.log`` (каталог игнорируется git). Без файла
+    traceback 500-й ошибки исчезал вместе с терминалом дочернего процесса.
+    """
+    configured = os.getenv("HIPPORAG_LOG_FILE")
+    if configured and configured.strip():
+        return Path(configured.strip())
+    return ROOT / "outputs" / "logs" / "server.log"
+
+
 def build_uvicorn_command(host: str, port: int, *, reload: bool = False) -> List[str]:
     """Собирает команду запуска uvicorn."""
     command = [
@@ -301,11 +314,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("[start] Проверки пройдены.")
         return 0
 
+    log_file = default_log_file()
+    print(f"[start] Журнал сервера: {log_file}")
+
     command = build_uvicorn_command(host, port, reload=args.reload)
+    env = os.environ.copy()
+    env.setdefault("HIPPORAG_LOG_FILE", str(log_file))
     print("[start] Запуск:", " ".join(command))
     print(f"[start] UI: http://{host}:{port}/  ·  API docs: http://{host}:{port}/docs")
     try:
-        return subprocess.call(command, cwd=str(ROOT), env=os.environ.copy())
+        return subprocess.call(command, cwd=str(ROOT), env=env)
     except KeyboardInterrupt:
         return 130
 

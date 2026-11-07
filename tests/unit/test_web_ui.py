@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
+import time
 
 import pytest
 from fastapi import HTTPException
@@ -275,6 +277,49 @@ def test_ask_route_maps_unknown_mode_to_400(monkeypatch):
         asyncio.run(web_server.ask(AskRequest(question="Вопрос", mode="99")))
 
     assert error.value.status_code == 400
+
+
+class _FakeAnswer:
+    """Минимальный ответ сервиса для проверки маршрута без пайплайна."""
+
+    retrieval_time = 0.0
+    answer_time = 0.0
+    abstained = False
+    citations = [1]
+    grounding_errors: list[str] = []
+    mode = "5"
+    fragments = [object()]
+
+
+def test_concurrent_ask_requests_are_serialized(monkeypatch):
+    """Пайплайн общий: два одновременных /api/ask не должны идти параллельно."""
+    monkeypatch.setattr(web_server.api_server, "hipporag", object())
+    state = {"active": 0, "max_active": 0}
+    guard = threading.Lock()
+
+    def fake_answer_question(*_args, **_kwargs):
+        with guard:
+            state["active"] += 1
+            state["max_active"] = max(state["max_active"], state["active"])
+        try:
+            time.sleep(0.1)
+        finally:
+            with guard:
+                state["active"] -= 1
+        return _FakeAnswer()
+
+    monkeypatch.setattr(web_server.service, "answer_question", fake_answer_question)
+
+    async def run_both():
+        return await asyncio.gather(
+            web_server.ask(AskRequest(question="Вопрос 1", mode="5")),
+            web_server.ask(AskRequest(question="Вопрос 2", mode="1")),
+        )
+
+    answers = asyncio.run(run_both())
+
+    assert state["max_active"] == 1
+    assert len(answers) == 2
 
 
 def test_feedback_route_writes_record(tmp_path, monkeypatch):
