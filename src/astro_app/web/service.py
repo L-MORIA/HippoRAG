@@ -175,6 +175,7 @@ def _metadata_at(store: Any, index: int) -> Dict[str, Any]:
 
 _TEXT_INDEX_CACHE_KEY: Optional[Tuple[int, int]] = None
 _TEXT_INDEX_CACHE: Optional[Dict[str, int]] = None
+_CLARIFICATIONS_CACHE: Optional[List[Dict[str, Any]]] = None
 
 
 def _text_to_index(store: Any, texts: List[str]) -> Dict[str, int]:
@@ -204,6 +205,58 @@ def _metadata_for_text(hipporag: Any, text: str) -> Dict[str, Any]:
     if index is None:
         return {}
     return _metadata_at(store, index)
+
+
+def _load_author_clarifications() -> List[Dict[str, Any]]:
+    """Уточнения автора (author_clarifications.json из package data).
+
+    Данные владельца/автора, а не текст издания; загрузка ленивая и
+    кэшируется. Файл необязателен: нет файла — нет инъекций.
+    """
+    global _CLARIFICATIONS_CACHE
+    if _CLARIFICATIONS_CACHE is not None:
+        return _CLARIFICATIONS_CACHE
+    from importlib import resources
+
+    from astro_app import versions
+
+    try:
+        versions.check_package_data()
+        with (
+            resources.files("astro_app.data")
+            .joinpath("author_clarifications.json")
+            .open(encoding="utf-8") as handle
+        ):
+            data = json.load(handle)
+        _CLARIFICATIONS_CACHE = list(data.get("clarifications", []))
+    except Exception:
+        _CLARIFICATIONS_CACHE = []
+    return _CLARIFICATIONS_CACHE
+
+
+def _author_clarification_fragment(question: str) -> Optional[RetrievedFragment]:
+    """Фрагмент-уточнение автора, если вопрос матчится; иначе None.
+
+    Уточнение добавляется после топ-k с явным источником: заземление
+    отвечает с цитатой, пользователь видит происхождение факта.
+    """
+    q_lower = (question or "").lower()
+    if not q_lower.strip():
+        return None
+    for entry in _load_author_clarifications():
+        if not all(str(word) in q_lower for word in entry.get("all", [])):
+            continue
+        if not any(str(word) in q_lower for word in entry.get("any", [""])):
+            continue
+        return RetrievedFragment(
+            text=entry["text"],
+            doc_title=entry.get("source", "Уточнение автора"),
+            page_num=0,
+            section="вне текущего издания",
+            source_file="author_clarification",
+            score=0.0,
+        )
+    return None
 
 
 def _fragment_from_result(hipporag: Any, result: Any) -> Optional[RetrievedFragment]:
@@ -316,8 +369,15 @@ def retrieve(
         seen.add(key)
         fragments.append(fragment)
 
+    fragments = fragments[:top_k]
+    clarification = _author_clarification_fragment(question)
+    if clarification is not None:
+        # Уточнение автора идёт добавкой после топ-k, чтобы не вытеснять
+        # фрагменты книги: модель получает его отдельным последним пунктом.
+        fragments.append(clarification)
+
     return RetrievalResult(
-        fragments=fragments[:top_k],
+        fragments=fragments,
         reformulated_query=reformulated_query,
         retrieval_time=time.perf_counter() - started,
     )
